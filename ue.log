@@ -1,0 +1,20 @@
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-43']
+[I] Connected!
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-39']
+[I] Received from server: {"res": 200}
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-38']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-38']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-36']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-38']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-38']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-37']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-37']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-36']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-37']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-37']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-36']
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-36']
+[!] Ending...
+[I] Successfully killed thread 18144
+[D] ['90:E8:68:83:FA:DD', 'Test301', '-36']
+[I] Successfully killed thread 15688

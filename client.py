@@ -2,13 +2,20 @@ import subprocess
 import socket
 import threading
 import time
-from get_rx_rssi import get_BSSI
+from test_rssi import get_BSSI
 import json
 import ctypes
+import logging
+import sys
+
+
+logger = logging.getLogger('')
+logger.setLevel(logging.DEBUG)
+logger.addHandler(logging.FileHandler('ue.log', mode='w', encoding='utf-8'))
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 def get_rssi():
-    # print('RSSI')
     global best_mac
     while True:
         new_mac = get_mac_to_connect()
@@ -21,7 +28,6 @@ def get_rssi():
 
 
 def get_mac_to_connect():
-    # print('MAC')
     json_data = json.loads(str(get_BSSI()).replace("'", "\""))
     if len(json_data) > 0:
         best_pow = -100
@@ -29,7 +35,7 @@ def get_mac_to_connect():
         val = 0
         current_pow = -100
         while val < len(json_data):
-            print(json_data[str(val)])
+            logger.debug('[D] ' + str(json_data[str(val)]))
             if int(json_data[str(val)][2]) > best_pow:
                 best_pow = int(json_data[str(val)][2])
                 best_val = val
@@ -45,16 +51,17 @@ def get_mac_to_connect():
 
 
 def handover(mac):
-    print('[I] Performing handover to ' + mac)
-    client_socket.close()
+    logger.info('[I] Performing handover to ' + mac)
     disconnect(False)
     connect(mac)
 
 
 def disconnect(starting):
-    # print('Disconnect')
     global connected
     if not starting:
+        message = json.dumps(dict(type="bye"))  # take input
+        client_socket.send(message.encode())  # send message
+        client_socket.recv(1024).decode()  # receive response
         kill_thread(server_thread.ident)
         server_thread.join()
     process_disconnect = subprocess.Popen(
@@ -67,7 +74,6 @@ def disconnect(starting):
 
 
 def connect(mac):
-    # print('Connect')
     global connected
     global server_thread
     while not connected:
@@ -81,10 +87,10 @@ def connect(mac):
         process_connect.communicate()
         time.sleep(2)
         if "Test301" in str(subprocess.check_output("netsh wlan show interfaces")):
-            print('[I] Connected!')
+            logger.info('[I] Connected!')
             connected = True
         else:
-            print('[!] Connection not established! Killing query and trying again...')
+            logger.warning('[!] Connection not established! Killing query and trying again...')
             kill_process(process_connect)
             time.sleep(5)
 
@@ -95,40 +101,44 @@ def connect(mac):
 
 
 def server_conn():
-    # print('Server')
     global client_socket
     host = '10.0.0.1'
     port = 5010  # socket server port number
     try:
         client_socket = socket.socket()
-        client_socket.connect((host, port))  # connect to the
+        ready = False
+        while not ready:
+            try:
+                client_socket.connect((host, port))  # connect to the server
+                ready = True
+            except OSError:
+                time.sleep(1)
         message = json.dumps(dict(type="auth", user_id=1))  # take input
 
         client_socket.send(message.encode())  # send message
         data = client_socket.recv(1024).decode()  # receive response
 
-        print('[I] Received from server: ' + data)  # show in terminal
+        logger.info('[I] Received from server: ' + data)  # show in terminal
 
         # message = input(" -> ")  # again take input
         while True:
             time.sleep(1)
 
     except ConnectionRefusedError:
-        print('[!] Server not available! Please, press enter to stop client.')
+        logger.error('[!] FEC server not available! Please, press enter to stop client.')
     except SystemExit:
-        print('Socket closed')
+        message = json.dumps(dict(type="bye"))  # take input
+        client_socket.send(message.encode())  # send message
         client_socket.close()  # close the connection
 
 
 def kill_process(process_kill):
-    # print('Kill process')
     process_kill.kill()
     process_kill.communicate()
 
 
 def kill_thread(thread_id):
     try:
-        # print('Kill thread')
         ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(thread_id), ctypes.py_object(SystemExit))
         # ref: http://docs.python.org/c-api/init.html#PyThreadState_SetAsyncExc
         if ret == 0:
@@ -136,7 +146,7 @@ def kill_thread(thread_id):
         elif ret > 1:
             ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
             raise SystemError("PyThreadState_SetAsyncExc failed")
-        print("[I] Successfully killed thread ", str(thread_id))
+        logger.info("[I] Successfully killed thread " + str(thread_id))
     except TypeError:
         pass
 
@@ -149,8 +159,6 @@ connected = False
 
 
 def main():
-    # print('Main')
-
     try:
         # Global variables
         global best_mac
@@ -172,16 +180,15 @@ def main():
 
         input('[*] Press enter to stop...')
 
-        print('[!] Ending...')
+        logger.info('[!] Ending...')
         kill_thread(rssi_thread.ident)
         rssi_thread.join()
         disconnect(False)
     except KeyboardInterrupt:
-        print('[!] Ending...')
-        kill_thread(rssi_thread.ident)
-        if rssi_thread.is_alive():
-            rssi_thread.join()
+        logger.info('[!] Ending...')
         disconnect(False)
+        kill_thread(rssi_thread.ident)
+        rssi_thread.join()
     except RuntimeError:
         pass
 
