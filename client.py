@@ -1,3 +1,4 @@
+import platform
 import subprocess
 import socket
 import threading
@@ -7,6 +8,7 @@ import json
 import ctypes
 import logging
 import sys
+from colorlog import ColoredFormatter
 
 
 class VNF:
@@ -26,8 +28,11 @@ class VNF:
 logger = logging.getLogger('')
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.FileHandler('ue.log', mode='w', encoding='utf-8'))
-logger.addHandler(logging.StreamHandler(sys.stdout))
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(ColoredFormatter())
+logger.addHandler(stream_handler)
 
+system_os = 'Windows'
 best_mac = ""
 client_socket = socket.socket()
 connected = False
@@ -35,10 +40,9 @@ fec_id = -1
 user_id = 1
 my_vnf = None
 previous_node = -1
-send_vnf = True
 
 
-def get_rssi():
+def wireless_conn_manager():
     global best_mac
     while True:
         new_mac = get_mac_to_connect()
@@ -50,30 +54,33 @@ def get_rssi():
         time.sleep(2)
 
 
-rssi_thread = threading.Thread(target=get_rssi)
+wireless_conn_thread = threading.Thread(target=wireless_conn_manager)
 
 
 def get_mac_to_connect():
-    json_data = json.loads(str(get_BSSI()).replace("'", "\""))
-    if len(json_data) > 0:
-        best_pow = -100
-        best_val = -1
-        val = 0
-        current_pow = -100
-        while val < len(json_data):
-            logger.debug('[D] ' + str(json_data[str(val)]))
-            if int(json_data[str(val)][2]) > best_pow:
-                best_pow = int(json_data[str(val)][2])
-                best_val = val
-            if best_mac == json_data[str(val)][0]:
-                current_pow = int(json_data[str(val)][2])
-            val += 1
-        if current_pow < int(json_data[str(best_val)][2]) - 5:
-            return json_data[str(best_val)][0]
+    if system_os == 'Windows':
+        json_data = json.loads(str(get_BSSI()).replace("'", "\""))
+        if len(json_data) > 0:
+            best_pow = -100
+            best_val = -1
+            val = 0
+            current_pow = -100
+            while val < len(json_data):
+                logger.debug('[D] ' + str(json_data[str(val)]))
+                if int(json_data[str(val)][2]) > best_pow:
+                    best_pow = int(json_data[str(val)][2])
+                    best_val = val
+                if best_mac == json_data[str(val)][0]:
+                    current_pow = int(json_data[str(val)][2])
+                val += 1
+            if current_pow < int(json_data[str(best_val)][2]) - 5:
+                return json_data[str(best_val)][0]
+            else:
+                return best_mac
         else:
             return best_mac
     else:
-        return best_mac
+        logger.critical('[!] System OS not supported! Please, stop program...')
 
 
 def handover(mac):
@@ -93,13 +100,16 @@ def disconnect(starting):
             kill_thread(server_thread.ident)
             server_thread.join()
         previous_node = fec_id
-        process_disconnect = subprocess.Popen(
-            'netsh wlan disconnect',
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        process_disconnect.communicate()
-        connected = False
+        if system_os == 'Windows':
+            process_disconnect = subprocess.Popen(
+                'netsh wlan disconnect',
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+            process_disconnect.communicate()
+            connected = False
+        else:
+            logger.critical('[!] System OS not supported! Please, stop program...')
     except ConnectionResetError:
         logger.critical('[!] Trying to reuse killed connection!')
     except Exception as e:
@@ -109,23 +119,26 @@ def disconnect(starting):
 def connect(mac):
     global connected
     global server_thread
-    while not connected:
-        # FEC 1: '90:E8:68:83:FA:DD'
-        # FEC 2: '90:E8:68:84:3B:97'
-        process_connect = subprocess.Popen(
-            'C:\\Archivos_de_programa\\WifiInfoView\\WifiInfoView.exe /ConnectAP "Test301" "' + mac + '"',
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        process_connect.communicate()
-        time.sleep(2)
-        if "Test301" in str(subprocess.check_output("netsh wlan show interfaces")):
-            logger.info('[I] Connected!')
-            connected = True
-        else:
-            logger.warning('[!] Connection not established! Killing query and trying again...')
-            kill_process(process_connect)
-            time.sleep(5)
+    if system_os == 'Windows':
+        while not connected:
+            # FEC 1: '90:E8:68:83:FA:DD'
+            # FEC 2: '90:E8:68:84:3B:97'
+            process_connect = subprocess.Popen(
+                'C:\\Archivos_de_programa\\WifiInfoView\\WifiInfoView.exe /ConnectAP "Test301" "' + mac + '"',
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+            process_connect.communicate()
+            time.sleep(2)
+            if "Test301" in str(subprocess.check_output("netsh wlan show interfaces")):
+                logger.info('[I] Connected!')
+                connected = True
+            else:
+                logger.warning('[!] Connection not established! Killing query and trying again...')
+                kill_process(process_connect)
+                time.sleep(5)
+    else:
+        logger.critical('[!] System OS not supported! Please, stop program...')
 
     # Thread controlling communications with server on FEC
     server_thread = threading.Thread(target=server_conn)
@@ -137,7 +150,6 @@ def server_conn():
     global client_socket
     global fec_id
     global my_vnf
-    global send_vnf
     host = '10.0.0.1'
     port = 5010  # socket server port number
     try:
@@ -160,47 +172,50 @@ def server_conn():
         else:
             logger.error('[!] Error ' + json_data['res'] + ' when authenticating to FEC!')
 
-        if send_vnf:
-            input('[*] Press enter to send a VNF...')
+        input('[*] Press enter to send a VNF...')
 
-            if my_vnf is None:
-                if fec_id == 1:
-                    target = 2
-                else:
-                    target = 1
-                my_vnf = VNF(dict(source=fec_id, target=target, gpu=512, ram=5, bw=250, rtt=0.5, previous_node=-1,
-                                  current_node=fec_id, fec_linked=fec_id, user_id=user_id))
-            else:
-                my_vnf.previous_node = previous_node
-                my_vnf.current_node = fec_id
-            message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
-            client_socket.send(message.encode())  # send message
-            data = client_socket.recv(1024).decode()  # receive response
-            json_data = json.loads(data)
-            if json_data['res'] == 200:
-                # MAKE CAR MOVE TOWARDS ACTION DIRECTION
-                logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
-                if json_data['action'] == 'e':
-                    logger.info('[I] Car reached target!')
-                    key_in = input('[*] Press enter to send a new VNF... type "q" for quitting')
-                    if key_in != 'q':
-                        if fec_id == 1:
-                            target = 2
-                        else:
-                            target = 1
-                        my_vnf = VNF(
-                            dict(source=fec_id, target=target, gpu=512, ram=5, bw=250, rtt=0.5, previous_node=-1,
-                                 current_node=fec_id, fec_linked=fec_id, user_id=user_id))
-                        message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
-                        client_socket.send(message.encode())  # send message
-                        data = client_socket.recv(1024).decode()  # receive response
-                        json_data = json.loads(data)
-                        if json_data['res'] == 200:
-                            logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
-                        else:
-                            logger.error('[!] Error ' + json_data['res'] + ' when sending VNF to FEC!')
-            else:
-                logger.error('[!] Error ' + json_data['res'] + ' when sending VNF to FEC!')
+        if my_vnf is None:
+            target = int(input('[*] Introduce the target position: '))
+            gpu = int(input('[*] Introduce the needed GPU GB: '))
+            ram = int(input('[*] Introduce the needed RAM GB: '))
+            bw = int(input('[*] Introduce the needed bandwidth (Mbps): '))
+            rtt = int(input('[*] Introduce the needed RTT (ms): '))
+
+            my_vnf = VNF(dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
+                              current_node=fec_id, fec_linked=fec_id, user_id=user_id))
+        else:
+            my_vnf.previous_node = previous_node
+            my_vnf.current_node = fec_id
+        message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
+        client_socket.send(message.encode())  # send message
+        data = client_socket.recv(1024).decode()  # receive response
+        json_data = json.loads(data)
+        if json_data['res'] == 200:
+            # MAKE CAR MOVE TOWARDS ACTION DIRECTION
+            logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
+            if json_data['action'] == 'e':
+                logger.info('[I] Car reached target!')
+                key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
+                if key_in != 'n':
+                    target = int(input('[*] Introduce the target position: '))
+                    gpu = int(input('[*] Introduce the needed GPU GB: '))
+                    ram = int(input('[*] Introduce the needed RAM GB: '))
+                    bw = int(input('[*] Introduce the needed bandwidth (Mbps): '))
+                    rtt = int(input('[*] Introduce the needed RTT (ms): '))
+
+                    my_vnf = VNF(
+                        dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
+                             current_node=fec_id, fec_linked=fec_id, user_id=user_id))
+                    message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
+                    client_socket.send(message.encode())  # send message
+                    data = client_socket.recv(1024).decode()  # receive response
+                    json_data = json.loads(data)
+                    if json_data['res'] == 200:
+                        logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
+                    else:
+                        logger.error('[!] Error ' + json_data['res'] + ' when sending VNF to FEC!')
+        else:
+            logger.error('[!] Error ' + json_data['res'] + ' when sending VNF to FEC!')
         while True:
             time.sleep(1)
 
@@ -237,10 +252,14 @@ def kill_thread(thread_id):
 
 
 def main():
+    global best_mac
+    global wireless_conn_thread
+    global system_os
+    global user_id
     try:
-        # Global variables
-        global best_mac
-        global rssi_thread
+        user_id = int(input('[*] Introduce your user ID: '))
+
+        system_os = platform.system()
 
         # In case of being connected to a network, disconnect
         disconnect(True)
@@ -252,27 +271,18 @@ def main():
         connect(best_mac)
 
         # Thread controlling RX power from all AP and performing handovers
-        rssi_thread = threading.Thread(target=get_rssi)
-        rssi_thread.daemon = True
-        rssi_thread.start()
+        wireless_conn_thread = threading.Thread(target=wireless_conn_manager)
+        wireless_conn_thread.daemon = True
+        wireless_conn_thread.start()
 
-        if send_vnf:
-            while True:
-                time.sleep(1)
-
-        else:
-            input('[*] Press enter to stop...')
-
-            logger.info('[!] Ending...')
-            kill_thread(rssi_thread.ident)
-            rssi_thread.join()
-            disconnect(False)
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         logger.info('[!] Ending...')
         disconnect(False)
         if connected:
-            kill_thread(rssi_thread.ident)
-            rssi_thread.join()
+            kill_thread(wireless_conn_thread.ident)
+            wireless_conn_thread.join()
     except Exception as e:
         logger.exception(e)
 
