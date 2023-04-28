@@ -25,6 +25,7 @@ class VNF:
         self.user_id = json_data['user_id']
 
 
+# Logging configuration
 logger = logging.getLogger('')
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.FileHandler('ue.log', mode='w', encoding='utf-8'))
@@ -32,6 +33,7 @@ stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setFormatter(ColoredFormatter())
 logger.addHandler(stream_handler)
 
+# Global variables
 system_os = 'Windows'
 best_mac = ""
 client_socket = socket.socket()
@@ -42,22 +44,29 @@ my_vnf = None
 previous_node = -1
 
 
-def wireless_conn_manager():
-    global best_mac
-    while True:
-        new_mac = get_mac_to_connect()
-        if new_mac != best_mac:
-            best_mac = new_mac
-            if connected:
-                handover(best_mac)
-
-        time.sleep(2)
-
-
-wireless_conn_thread = threading.Thread(target=wireless_conn_manager)
+def get_data_by_console(data_type, message):
+    # Function that reads a console entry asking for data to store into a variable
+    valid = False
+    output = None
+    if data_type == int:
+        while not valid:
+            try:
+                output = int(input(message))
+                valid = True
+            except ValueError:
+                logger.warning('[!] Error in introduced data! Must use int values. Try again...')
+                valid = False
+            except Exception as e:
+                logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
+                valid = False
+    else:
+        logger.error('[!] Data type getter not implemented!')
+    return output
 
 
 def get_mac_to_connect():
+    # Function that returns the wireless_conn_manager the mac of the best FEC to connect.
+    # Takes into account a hysteresis margin of 5 dB for changing FEC
     if system_os == 'Windows':
         json_data = json.loads(str(get_BSSI()).replace("'", "\""))
         if len(json_data) > 0:
@@ -81,15 +90,18 @@ def get_mac_to_connect():
             return best_mac
     else:
         logger.critical('[!] System OS not supported! Please, stop program...')
+        return
 
 
 def handover(mac):
+    # Function that handles handovers. First disconnects from current FEC and after connects to the new one
     logger.info('[I] Performing handover to ' + mac)
     disconnect(False)
     connect(mac)
 
 
 def disconnect(starting):
+    # Disconnects from current FEC
     global connected
     global previous_node
     try:
@@ -110,6 +122,7 @@ def disconnect(starting):
             connected = False
         else:
             logger.critical('[!] System OS not supported! Please, stop program...')
+            return
     except ConnectionResetError:
         logger.critical('[!] Trying to reuse killed connection!')
     except Exception as e:
@@ -117,6 +130,7 @@ def disconnect(starting):
 
 
 def connect(mac):
+    # This function manages connecting to a new FEC given its MAC address
     global connected
     global server_thread
     if system_os == 'Windows':
@@ -135,10 +149,12 @@ def connect(mac):
                 connected = True
             else:
                 logger.warning('[!] Connection not established! Killing query and trying again...')
-                kill_process(process_connect)
+                process_connect.kill()
+                process_connect.communicate()
                 time.sleep(5)
     else:
         logger.critical('[!] System OS not supported! Please, stop program...')
+        return
 
     # Thread controlling communications with server on FEC
     server_thread = threading.Thread(target=server_conn)
@@ -146,7 +162,21 @@ def connect(mac):
     server_thread.start()
 
 
+def generate_vnf():
+    # This function returns a new VNF object whose fields are given by console
+    target = get_data_by_console(int, '[*] Introduce the target position: ')
+    gpu = get_data_by_console(int, '[*] Introduce the needed GPU GB: ')
+    ram = get_data_by_console(int, '[*] Introduce the needed RAM GB: ')
+    bw = get_data_by_console(int, '[*] Introduce the needed bandwidth (Mbps): ')
+    rtt = get_data_by_console(int, '[*] Introduce the needed RTT (ms): ')
+
+    return VNF(dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
+                    current_node=fec_id, fec_linked=fec_id, user_id=user_id))
+
+
 def server_conn():
+    # This function is running on a second thread as long as being connected to a FEC.
+    # It sends data to the sockets server and waits for responses
     global client_socket
     global fec_id
     global my_vnf
@@ -169,20 +199,15 @@ def server_conn():
         if json_data['res'] == 200:
             logger.info('[I] Response from FEC: ' + str(json_data))
             fec_id = json_data['id']
+            if my_vnf is not None:
+                my_vnf.fec_linked = fec_id
         else:
             logger.error('[!] Error ' + json_data['res'] + ' when authenticating to FEC!')
 
         input('[*] Press enter to send a VNF...')
 
         if my_vnf is None:
-            target = int(input('[*] Introduce the target position: '))
-            gpu = int(input('[*] Introduce the needed GPU GB: '))
-            ram = int(input('[*] Introduce the needed RAM GB: '))
-            bw = int(input('[*] Introduce the needed bandwidth (Mbps): '))
-            rtt = int(input('[*] Introduce the needed RTT (ms): '))
-
-            my_vnf = VNF(dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
-                              current_node=fec_id, fec_linked=fec_id, user_id=user_id))
+            my_vnf = generate_vnf()
         else:
             my_vnf.previous_node = previous_node
             my_vnf.current_node = fec_id
@@ -197,15 +222,8 @@ def server_conn():
                 logger.info('[I] Car reached target!')
                 key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                 if key_in != 'n':
-                    target = int(input('[*] Introduce the target position: '))
-                    gpu = int(input('[*] Introduce the needed GPU GB: '))
-                    ram = int(input('[*] Introduce the needed RAM GB: '))
-                    bw = int(input('[*] Introduce the needed bandwidth (Mbps): '))
-                    rtt = int(input('[*] Introduce the needed RTT (ms): '))
+                    my_vnf = generate_vnf()
 
-                    my_vnf = VNF(
-                        dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
-                             current_node=fec_id, fec_linked=fec_id, user_id=user_id))
                     message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
                     client_socket.send(message.encode())  # send message
                     data = client_socket.recv(1024).decode()  # receive response
@@ -232,12 +250,8 @@ def server_conn():
 server_thread = threading.Thread(target=server_conn)
 
 
-def kill_process(process_kill):
-    process_kill.kill()
-    process_kill.communicate()
-
-
 def kill_thread(thread_id):
+    # This functions kills a thread. It is used for stopping the program or disconnecting from a FEC
     try:
         ret = ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(thread_id), ctypes.py_object(SystemExit))
         # ref: http://docs.python.org/c-api/init.html#PyThreadState_SetAsyncExc
@@ -252,37 +266,40 @@ def kill_thread(thread_id):
 
 
 def main():
+    # Main function
+    # Global variables
     global best_mac
-    global wireless_conn_thread
     global system_os
     global user_id
+    global best_mac
     try:
-        user_id = int(input('[*] Introduce your user ID: '))
+        # Get user_id
+        user_id = get_data_by_console(int, '[*] Introduce your user ID: ')
 
+        # Get Operative System
         system_os = platform.system()
 
         # In case of being connected to a network, disconnect
         disconnect(True)
 
-        # Get the best FEC int terms of power and connect to it
+        # Get the best FEC in terms of power and connect to it
         while best_mac == "":
             time.sleep(2)
             best_mac = get_mac_to_connect()
         connect(best_mac)
 
-        # Thread controlling RX power from all AP and performing handovers
-        wireless_conn_thread = threading.Thread(target=wireless_conn_manager)
-        wireless_conn_thread.daemon = True
-        wireless_conn_thread.start()
-
+        # Loop asking for best FEC to connect and managing handovers
         while True:
-            time.sleep(1)
+            new_mac = get_mac_to_connect()
+            if new_mac != best_mac:
+                best_mac = new_mac
+                if connected:
+                    handover(best_mac)
+
+            time.sleep(2)
     except KeyboardInterrupt:
         logger.info('[!] Ending...')
         disconnect(False)
-        if connected:
-            kill_thread(wireless_conn_thread.ident)
-            wireless_conn_thread.join()
     except Exception as e:
         logger.exception(e)
 
