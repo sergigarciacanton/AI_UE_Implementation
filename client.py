@@ -59,6 +59,17 @@ def get_data_by_console(data_type, message):
             except Exception as e:
                 logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
                 valid = False
+    elif data_type == float:
+        while not valid:
+            try:
+                output = float(input(message))
+                valid = True
+            except ValueError:
+                logger.warning('[!] Error in introduced data! Must use float values. Try again...')
+                valid = False
+            except Exception as e:
+                logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
+                valid = False
     else:
         logger.error('[!] Data type getter not implemented!')
     return output
@@ -168,7 +179,7 @@ def generate_vnf():
     gpu = get_data_by_console(int, '[*] Introduce the needed GPU GB: ')
     ram = get_data_by_console(int, '[*] Introduce the needed RAM GB: ')
     bw = get_data_by_console(int, '[*] Introduce the needed bandwidth (Mbps): ')
-    rtt = get_data_by_console(int, '[*] Introduce the needed RTT (ms): ')
+    rtt = get_data_by_console(float, '[*] Introduce the needed RTT (ms): ')
 
     return VNF(dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
                     current_node=fec_id, fec_linked=fec_id, user_id=user_id))
@@ -180,6 +191,7 @@ def server_conn():
     global client_socket
     global fec_id
     global my_vnf
+    global user_id
     host = '10.0.0.1'
     port = 5010  # socket server port number
     try:
@@ -191,49 +203,72 @@ def server_conn():
                 ready = True
             except OSError:
                 time.sleep(1)
-        message = json.dumps(dict(type="auth", user_id=1))  # take input
+        auth_valid = False
+        while not auth_valid:
+            message = json.dumps(dict(type="auth", user_id=user_id))  # take input
 
-        client_socket.send(message.encode())  # send message
-        data = client_socket.recv(1024).decode()  # receive response
-        json_data = json.loads(data)
-        if json_data['res'] == 200:
-            logger.info('[I] Response from FEC: ' + str(json_data))
-            fec_id = json_data['id']
-            if my_vnf is not None:
-                my_vnf.fec_linked = fec_id
-        else:
-            logger.error('[!] Error ' + json_data['res'] + ' when authenticating to FEC!')
+            client_socket.send(message.encode())  # send message
+            data = client_socket.recv(1024).decode()  # receive response
+            json_data = json.loads(data)
+            if json_data['res'] == 200:
+                logger.info('[I] Successfully authenticated to FEC ' + str(json_data['id']) + '!')
+                fec_id = json_data['id']
+                auth_valid = True
+                if my_vnf is not None:
+                    my_vnf.fec_linked = fec_id
+            else:
+                logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
+                user_id = get_data_by_console(int, '[*] Introduce a valid user ID: ')
 
         input('[*] Press enter to send a VNF...')
 
-        if my_vnf is None:
-            my_vnf = generate_vnf()
-        else:
-            my_vnf.previous_node = previous_node
-            my_vnf.current_node = fec_id
-        message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
-        client_socket.send(message.encode())  # send message
-        data = client_socket.recv(1024).decode()  # receive response
-        json_data = json.loads(data)
-        if json_data['res'] == 200:
-            # MAKE CAR MOVE TOWARDS ACTION DIRECTION
-            logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
-            if json_data['action'] == 'e':
-                logger.info('[I] Car reached target!')
-                key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
-                if key_in != 'n':
-                    my_vnf = generate_vnf()
+        valid_vnf = False
+        while not valid_vnf:
+            if my_vnf is None:
+                my_vnf = generate_vnf()
+            else:
+                my_vnf.previous_node = previous_node
+                my_vnf.current_node = fec_id
+            message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
+            client_socket.send(message.encode())  # send message
+            data = client_socket.recv(1024).decode()  # receive response
+            json_data = json.loads(data)
+            if json_data['res'] == 200:
+                valid_vnf = True
+                # MAKE CAR MOVE TOWARDS ACTION DIRECTION
+                logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
+                if json_data['action'] == 'e':
+                    logger.info('[I] Car reached target!')
+                    key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
+                    if key_in != 'n':
+                        valid_new_vnf = False
+                        while not valid_new_vnf:
+                            my_vnf = generate_vnf()
 
-                    message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
-                    client_socket.send(message.encode())  # send message
-                    data = client_socket.recv(1024).decode()  # receive response
-                    json_data = json.loads(data)
-                    if json_data['res'] == 200:
-                        logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
-                    else:
-                        logger.error('[!] Error ' + json_data['res'] + ' when sending VNF to FEC!')
-        else:
-            logger.error('[!] Error ' + json_data['res'] + ' when sending VNF to FEC!')
+                            message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
+                            client_socket.send(message.encode())  # send message
+                            data = client_socket.recv(1024).decode()  # receive response
+                            json_data = json.loads(data)
+                            if json_data['res'] == 200:
+                                valid_new_vnf = True
+                                logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
+                            elif json_data['res'] == 403:
+                                logger.error(
+                                    '[!] Error! Required resources are not available on current FEC. Ask for less '
+                                    'resources.')
+                            elif json_data['res'] == 404:
+                                logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                            else:
+                                logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+            elif json_data['res'] == 403:
+                my_vnf = None
+                logger.error('[!] Error! Required resources are not available on current FEC. Ask for less resources.')
+            elif json_data['res'] == 404:
+                my_vnf = None
+                logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+            else:
+                my_vnf = None
+                logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
         while True:
             time.sleep(1)
 
