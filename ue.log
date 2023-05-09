@@ -1,6 +1,18 @@
 [I] Connected!
 [I] Successfully authenticated to FEC 1!
+[I] Response from server: r
+[I] Performing handover to 90:E8:68:84:3B:97
+[I] Successfully killed thread 12788
+[I] Connected!
+[I] Successfully authenticated to FEC 2!
+[I] Response from server: e
+[I] Car reached target!
+[I] Response from server: r
+[I] Performing handover to 90:E8:68:83:FA:DD
+[I] Successfully killed thread 8768
+[I] Connected!
+[I] Successfully authenticated to FEC 1!
 [I] Response from server: e
 [I] Car reached target!
 [!] Ending...
-[I] Successfully killed thread 2252
+[I] Successfully killed thread 12828

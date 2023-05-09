@@ -4,7 +4,7 @@ import subprocess
 import socket
 import threading
 import time
-from test_rssi import get_BSSI
+from get_rx_rssi import get_BSSI
 import json
 import ctypes
 import logging
@@ -19,7 +19,6 @@ class VNF:
         self.gpu = json_data['gpu']
         self.ram = json_data['ram']
         self.bw = json_data['bw']
-        self.rtt = json_data['rtt']
         self.previous_node = json_data['previous_node']
         self.current_node = json_data['current_node']
         self.fec_linked = json_data['fec_linked']
@@ -182,9 +181,8 @@ def generate_vnf():
     gpu = get_data_by_console(int, '[*] Introduce the needed GPU GB: ')
     ram = get_data_by_console(int, '[*] Introduce the needed RAM GB: ')
     bw = get_data_by_console(int, '[*] Introduce the needed bandwidth (Mbps): ')
-    rtt = get_data_by_console(float, '[*] Introduce the needed RTT (ms): ')
 
-    return VNF(dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, rtt=rtt, previous_node=-1,
+    return VNF(dict(source=fec_id, target=target, gpu=gpu, ram=ram, bw=bw, previous_node=-1,
                     current_node=fec_id, fec_linked=fec_id, user_id=user_id))
 
 
@@ -298,7 +296,7 @@ def kill_thread(thread_id):
         elif ret > 1:
             ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
             raise SystemError("PyThreadState_SetAsyncExc failed")
-        logger.info("[I] Successfully killed thread " + str(thread_id))
+        logger.debug("[D] Successfully killed thread " + str(thread_id))
     except Exception as e:
         logger.exception(e)
 
