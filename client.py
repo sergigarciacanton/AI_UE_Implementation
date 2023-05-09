@@ -1,3 +1,4 @@
+import configparser
 import platform
 import subprocess
 import socket
@@ -25,10 +26,14 @@ class VNF:
         self.user_id = json_data['user_id']
 
 
+# Import settings from configuration file
+config = configparser.ConfigParser()
+config.read('C:\\Users\\Usuario\\Documents\\UNI\\2022 - 23 Q2\\Work\\Codes\\7b659cf16faa821bdd80\\ue.ini')
+general = config['general']
 # Logging configuration
 logger = logging.getLogger('')
-logger.setLevel(logging.INFO)
-logger.addHandler(logging.FileHandler('ue.log', mode='w', encoding='utf-8'))
+logger.setLevel(int(general['log_level']))
+logger.addHandler(logging.FileHandler(general['log_file_name'], mode='w', encoding='utf-8'))
 stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setFormatter(ColoredFormatter())
 logger.addHandler(stream_handler)
@@ -146,10 +151,8 @@ def connect(mac):
     global server_thread
     if system_os == 'Windows':
         while not connected:
-            # FEC 1: '90:E8:68:83:FA:DD'
-            # FEC 2: '90:E8:68:84:3B:97'
             process_connect = subprocess.Popen(
-                'C:\\Archivos_de_programa\\WifiInfoView\\WifiInfoView.exe /ConnectAP "Test301" "' + mac + '"',
+                general['wifi_handler_file'] + ' /ConnectAP "' + general['wifi_ssid'] + '" "' + mac + '"',
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE)
@@ -192,8 +195,8 @@ def server_conn():
     global fec_id
     global my_vnf
     global user_id
-    host = '10.0.0.1'
-    port = 5010  # socket server port number
+    host = general['fec_ip']
+    port = int(general['fec_port'])  # socket server port number
     try:
         client_socket = socket.socket()
         ready = False
