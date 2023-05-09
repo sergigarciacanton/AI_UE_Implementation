@@ -1,4 +1,6 @@
 venv/
+kml_files/
+logs/
 *.log
 *.ini
 *.kml
