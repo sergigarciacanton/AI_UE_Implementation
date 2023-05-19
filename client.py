@@ -26,8 +26,15 @@ class VNF:
 
 
 # Import settings from configuration file
+system_os = platform.system()
 config = configparser.ConfigParser()
-config.read('C:\\Users\\Usuario\\Documents\\UNI\\2022 - 23 Q2\\Work\\Codes\\7b659cf16faa821bdd80\\ue.ini')
+if system_os == "Windows":
+    config.read('C:\\Users\\Usuario\\Documents\\UNI\\2022 - 23 Q2\\Work\\Codes\\7b659cf16faa821bdd80\\ue.ini')
+elif system_os == "Linux":
+    config.read('ue.ini')
+else:
+    print('OS not supported! Stopping...')
+    exit(-1)
 general = config['general']
 # Logging configuration
 logger = logging.getLogger('')
@@ -38,7 +45,6 @@ stream_handler.setFormatter(ColoredFormatter())
 logger.addHandler(stream_handler)
 
 # Global variables
-system_os = 'Windows'
 best_mac = ""
 client_socket = socket.socket()
 connected = False
@@ -103,6 +109,27 @@ def get_mac_to_connect():
                 return best_mac
         else:
             return best_mac
+    elif system_os == 'Linux':
+        data = subprocess.check_output(['nmcli', '-f', 'SSID,BSSID,SIGNAL', 'dev', 'wifi']).decode().split('\n')
+        if len(data) > 0:
+            best_pow = -100
+            best_val = -1
+            val = 0
+            current_pow = -100
+            while val < len(data):
+                logger.debug('[D] ' + data[val])
+                if int(data[val][2]) > best_pow and data[val][0] == general['wifi_ssid']:
+                    best_pow = int(data[val][2])
+                    best_val = val
+                if best_mac == data[val][1]:
+                    current_pow = int(data[val][2])
+                val += 1
+            if current_pow < int(data[best_val][2]) - 5:
+                return data[best_val][1]
+            else:
+                return best_mac
+        else:
+            return best_mac
     else:
         logger.critical('[!] System OS not supported! Please, stop program...')
         return
@@ -130,6 +157,14 @@ def disconnect(starting):
         if system_os == 'Windows':
             process_disconnect = subprocess.Popen(
                 'netsh wlan disconnect',
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
+            process_disconnect.communicate()
+            connected = False
+        elif system_os == 'Linux':
+            process_disconnect = subprocess.Popen(
+                'nmcli con down "' + general['wifi_ssid'] + '"',
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE)
@@ -164,7 +199,23 @@ def connect(mac):
                 logger.warning('[!] Connection not established! Killing query and trying again...')
                 process_connect.kill()
                 process_connect.communicate()
-                time.sleep(5)
+                time.sleep(1)
+    elif system_os == 'Linux':
+        while not connected:
+            process_connect = subprocess.Popen('nmcli d wifi connect ' + mac,
+                                               shell=True,
+                                               stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE)
+            process_connect.communicate()
+            time.sleep(2)
+            if "Test301" in str(subprocess.check_output("iwgetid")):
+                logger.info('[I] Connected!')
+                connected = True
+            else:
+                logger.warning('[!] Connection not established! Killing query and trying again...')
+                process_connect.kill()
+                process_connect.communicate()
+                time.sleep(1)
     else:
         logger.critical('[!] System OS not supported! Please, stop program...')
         return
@@ -305,15 +356,11 @@ def main():
     # Main function
     # Global variables
     global best_mac
-    global system_os
     global user_id
     global best_mac
     try:
         # Get user_id
         user_id = get_data_by_console(int, '[*] Introduce your user ID: ')
-
-        # Get Operative System
-        system_os = platform.system()
 
         # In case of being connected to a network, disconnect
         disconnect(True)
