@@ -139,7 +139,7 @@ def disconnect(starting):
             logger.critical('[!] System OS not supported! Please, stop program...')
             return
     except ConnectionResetError:
-        logger.critical('[!] Trying to reuse killed connection!')
+        logger.warning('[!] Trying to reuse killed connection!')
     except Exception as e:
         logger.exception(e)
 
@@ -237,7 +237,7 @@ def server_conn():
             if json_data['res'] == 200:
                 valid_vnf = True
                 # MAKE CAR MOVE TOWARDS ACTION DIRECTION
-                logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
+                logger.info('[I] Response from server: ' + str(json_data))
                 if json_data['action'] == 'e':
                     logger.info('[I] Car reached target!')
                     key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
@@ -252,7 +252,7 @@ def server_conn():
                             json_data = json.loads(data)
                             if json_data['res'] == 200:
                                 valid_new_vnf = True
-                                logger.info('[I] Response from server: ' + str(json_data['action']))  # NOT IMPLEMENTED!
+                                logger.info('[I] Response from server: ' + str(json_data))
                             elif json_data['res'] == 403:
                                 logger.error(
                                     '[!] Error! Required resources are not available on current FEC. Ask for less '
