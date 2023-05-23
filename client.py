@@ -4,7 +4,6 @@ import subprocess
 import socket
 import threading
 import time
-from get_rx_rssi import get_BSSI
 import json
 import ctypes
 import logging
@@ -93,6 +92,7 @@ def get_mac_to_connect():
     # Function that returns the wireless_conn_manager the mac of the best FEC to connect.
     # Takes into account a hysteresis margin of 5 dB for changing FEC
     if system_os == 'Windows':
+        from get_rx_rssi import get_BSSI
         json_data = json.loads(str(get_BSSI()).replace("'", "\""))
         if len(json_data) > 0:
             best_pow = -100
@@ -114,22 +114,33 @@ def get_mac_to_connect():
         else:
             return best_mac
     elif system_os == 'Linux':
-        data = subprocess.check_output(['nmcli', '-f', 'SSID,BSSID,SIGNAL', 'dev', 'wifi']).decode().split('\n')
+        data = subprocess.check_output(['nmcli', '-f', 'SSID,BSSID,SIGNAL', 'dev', 'wifi']).decode().split('\n')[1:]
+
         if len(data) > 0:
             best_pow = -100
-            best_val = -1
             val = 0
             current_pow = -100
-            while val < len(data):
+            best_pow_mac = ""
+            while val < len(data) - 1:
                 logger.debug('[D] ' + data[val])
-                if int(data[val][2]) > best_pow and data[val][0] == general['wifi_ssid']:
-                    best_pow = int(data[val][2])
-                    best_val = val
-                if best_mac == data[val][1]:
-                    current_pow = int(data[val][2])
+                splitted_data = data[val].split(' ')
+                i = 0
+                while i < len(splitted_data):
+                    if splitted_data[i] == '':
+                        splitted_data.pop(i)
+                    else:
+                        i += 1
+                if splitted_data[0] != 'Test301':
+                    pass
+                else:
+                    if int(splitted_data[2]) > best_pow:
+                        best_pow = int(splitted_data[2])
+                        best_pow_mac = splitted_data[1]
+                    if best_mac == splitted_data[1]:
+                        current_pow = int(splitted_data[2])
                 val += 1
-            if current_pow < int(data[best_val][2]) - 5:
-                return data[best_val][1]
+            if current_pow < best_pow - 5:
+                return best_pow_mac
             else:
                 return best_mac
         else:
@@ -206,7 +217,7 @@ def connect(mac):
                 time.sleep(1)
     elif system_os == 'Linux':
         while not connected:
-            process_connect = subprocess.Popen('nmcli d wifi connect ' + mac,
+            process_connect = subprocess.Popen('nmcli d wifi connect ' + mac + ' password 1234567890',
                                                shell=True,
                                                stdout=subprocess.PIPE,
                                                stderr=subprocess.PIPE)
