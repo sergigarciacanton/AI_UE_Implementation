@@ -125,7 +125,7 @@ def get_mac_to_connect():
                         splitted_data.pop(i)
                     else:
                         i += 1
-                if splitted_data[0] != 'Test301':
+                if splitted_data[0] != general['wifi_ssid']:
                     pass
                 else:
                     if int(splitted_data[2]) > best_pow:
@@ -202,7 +202,7 @@ def connect(mac):
                 stderr=subprocess.PIPE)
             process_connect.communicate()
             time.sleep(2)
-            if "Test301" in str(subprocess.check_output("netsh wlan show interfaces")):
+            if general['wifi_ssid'] in str(subprocess.check_output("netsh wlan show interfaces")):
                 logger.info('[I] Connected!')
                 connected = True
             else:
@@ -218,7 +218,7 @@ def connect(mac):
                                                stderr=subprocess.PIPE)
             process_connect.communicate()
             time.sleep(2)
-            if "Test301" in str(subprocess.check_output("iwgetid")):
+            if general['wifi_ssid'] in str(subprocess.check_output("iwgetid")):
                 logger.info('[I] Connected!')
                 connected = True
             else:
@@ -311,9 +311,9 @@ def rotate(new_direction):
         current_degrees = 0
 
     degrees = fin_degrees - current_degrees
-    if degrees > 360:
+    if degrees > 180:
         degrees = degrees - 360
-    elif degrees < -360:
+    elif degrees < -180:
         degrees = degrees + 360
 
     if degrees < 0:
@@ -322,8 +322,8 @@ def rotate(new_direction):
     else:
         direction = 1
 
-    bot.set_motor(1, direction * 50)
-    bot.set_motor(2, -direction * 50)
+    bot.set_motor(1, direction * int(general['motor_speed']))
+    bot.set_motor(2, -direction * int(general['motor_speed']))
 
     time.sleep(float(degrees/100))
 
@@ -389,8 +389,8 @@ def server_conn():
             while my_vnf is not None:
                 # Move to next point
                 if bot is not None:
-                    bot.set_motor(1, 50)
-                    bot.set_motor(2, 50)
+                    bot.set_motor(1, int(general['motor_speed']))
+                    bot.set_motor(2, int(general['motor_speed']))
                 if gps is not None:
                     while gps.distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
                                        gps.getLatitude(), gps.getLongitude()) > 2:
