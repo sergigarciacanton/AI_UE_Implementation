@@ -27,14 +27,7 @@ class VNF:
 # Import settings from configuration file
 system_os = platform.system()
 config = configparser.ConfigParser()
-if system_os == "Windows":
-    config.read('ue.ini')
-    # config.read('C:\\Users\\Usuario\\Documents\\UNI\\2022 - 23 Q2\\Work\\Codes\\7b659cf16faa821bdd80\\ue.ini')
-elif system_os == "Linux":
-    config.read('ue.ini')
-else:
-    print('OS not supported! Stopping...')
-    exit(-1)
+config.read('ue.ini')
 general = config['general']
 # Logging configuration
 logger = logging.getLogger('')
@@ -55,6 +48,8 @@ previous_node = -1
 next_node = -1
 next_location = '0,0'
 gps = None
+bot = None
+current_direction = 'u'
 
 
 def get_data_by_console(data_type, message):
@@ -257,15 +252,21 @@ def get_next_action(json_data):
     global next_node
     global next_location
     global my_vnf
+    global current_direction
     logger.info('[I] Response from server: ' + str(json_data))
     if json_data['res'] == 200:
         next_node = json_data['next_node']
         if gps is not None:
             next_location = json_data['location']
-        # MAKE CAR MOVE TOWARDS ACTION DIRECTION
         if json_data['action'] == 'e':
             logger.info('[I] Car reached target!')
-            # STOP CAR
+            if bot is not None:
+                bot.set_motor(1, 0)
+                bot.set_motor(2, 0)
+                if 'u' != current_direction:
+                    # Return transbot to default direction
+                    rotate('u')
+                    current_direction = 'u'
             key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
             if key_in != 'n':
                 my_vnf = None
@@ -290,6 +291,46 @@ def get_next_action(json_data):
         return False, False
 
 
+def rotate(new_direction):
+    if new_direction == 'r':
+        fin_degrees = 90
+    elif new_direction == 'd':
+        fin_degrees = 180
+    elif new_direction == 'l':
+        fin_degrees = 270
+    else:
+        fin_degrees = 0
+
+    if current_direction == 'r':
+        current_degrees = 90
+    elif current_direction == 'd':
+        current_degrees = 180
+    elif current_direction == 'l':
+        current_degrees = 270
+    else:
+        current_degrees = 0
+
+    degrees = fin_degrees - current_degrees
+    if degrees > 360:
+        degrees = degrees - 360
+    elif degrees < -360:
+        degrees = degrees + 360
+
+    if degrees < 0:
+        degrees = degrees * -1
+        direction = -1
+    else:
+        direction = 1
+
+    bot.set_motor(1, direction * 50)
+    bot.set_motor(2, -direction * 50)
+
+    time.sleep(float(degrees/100))
+
+    bot.set_motor(1, 0)
+    bot.set_motor(2, 0)
+
+
 def server_conn():
     # This function is running on a second thread as long as being connected to a FEC.
     # It sends data to the sockets server and waits for responses
@@ -299,6 +340,8 @@ def server_conn():
     global user_id
     global next_node
     global next_location
+    global bot
+    global current_direction
     host = general['fec_ip']
     port = int(general['fec_port'])  # socket server port number
     try:
@@ -330,6 +373,7 @@ def server_conn():
             stop = False
             if my_vnf is None:
                 valid_vnf = False
+                json_data = dict()
                 while not valid_vnf:
                     my_vnf = generate_vnf()
                     message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
@@ -337,8 +381,16 @@ def server_conn():
                     data = client_socket.recv(1024).decode()  # receive response
                     json_data = json.loads(data)
                     valid_vnf, stop = get_next_action(json_data)
+                if bot is not None:
+                    if json_data['action'] != current_direction:
+                        # Need to rotate transbot first
+                        rotate(json_data['action'])
+                        current_direction = json_data['action']
             while my_vnf is not None:
                 # Move to next point
+                if bot is not None:
+                    bot.set_motor(1, 50)
+                    bot.set_motor(2, 50)
                 if gps is not None:
                     while gps.distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
                                        gps.getLatitude(), gps.getLongitude()) > 2:
@@ -398,13 +450,22 @@ def main():
     global best_mac
     global user_id
     global gps
+    global bot
+    global current_direction
     try:
         # Get user_id
         user_id = get_data_by_console(int, '[*] Introduce your user ID: ')
+
         gps_if = input('[?] Want to use GPS locations? Y/n: (n) ')
         if gps_if == 'y' or gps_if == 'Y':
             from gps_handler import GPS
             gps = GPS()
+
+        if system_os == 'Linux':
+            transbot_if = input('[?] Is this device a Transbot? Y/n: (Y)')
+            if transbot_if != 'n' and transbot_if != 'N':
+                from Transbot_Lib import Transbot
+                bot = Transbot()
 
         # In case of being connected to a network, disconnect
         disconnect(True)
@@ -426,6 +487,13 @@ def main():
             time.sleep(2)
     except KeyboardInterrupt:
         logger.info('[!] Ending...')
+        if bot is not None:
+            bot.set_motor(1, 0)
+            bot.set_motor(2, 0)
+            if 'u' != current_direction:
+                # Return transbot to default direction
+                rotate('u')
+                current_direction = 'u'
         disconnect(False)
     except Exception as e:
         logger.exception(e)

@@ -1,6 +1,7 @@
 venv/
 kml_files/
 logs/
+py_install/
 *.log
 *.ini
 *.kml
