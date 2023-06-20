@@ -257,8 +257,8 @@ def generate_vnf():
     # This function returns a new VNF object whose fields are given by console
     source = get_data_by_console(int, '[*] Introduce the source position: ')
     target = get_data_by_console(int, '[*] Introduce the target position: ')
-    gpu = get_data_by_console(int, '[*] Introduce the needed GPU GB: ')
-    ram = get_data_by_console(int, '[*] Introduce the needed RAM GB: ')
+    gpu = get_data_by_console(int, '[*] Introduce the needed GPU MB: ')
+    ram = get_data_by_console(int, '[*] Introduce the needed RAM MB: ')
     bw = get_data_by_console(int, '[*] Introduce the needed bandwidth (Mbps): ')
 
     return VNF(dict(source=source, target=target, gpu=gpu, ram=ram, bw=bw, previous_node=-1,
