@@ -109,14 +109,30 @@ def get_mac_to_connect():
         else:
             return best_mac
     elif system_os == 'Linux':
-        data = subprocess.check_output(['nmcli', '-f', 'SSID,BSSID,SIGNAL', 'dev', 'wifi']).decode().split('\n')[1:]
+        data = []
+        try:
+            iwlist_scan = subprocess.check_output(['sudo', 'iwlist', 'wlan0', 'scan'],
+                                                  stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            logger.error('[!] Unexpected error:', e)
+        else:
+            iwlist_scan = iwlist_scan.decode('utf-8').split('Address: ')
+            i = 1
+            while i < len(iwlist_scan):
+                bssid = iwlist_scan[i].split('\n')[0]
+                ssid = iwlist_scan[i].split('ESSID:"')[1].split('"')[0]
+                power = iwlist_scan[i].split('level=')[1].split(' dBm')[0]
+                if ssid == 'Test301':
+                    cell = ssid + ' ' + bssid + ' ' + power
+                    data.append(cell)
+                i += 1
 
         if len(data) > 0:
             best_pow = -100
             val = 0
             current_pow = -100
             best_pow_mac = ""
-            while val < len(data) - 1:
+            while val < len(data):
                 logger.debug('[D] ' + data[val])
                 splitted_data = data[val].split(' ')
                 i = 0
@@ -173,8 +189,9 @@ def disconnect(starting):
             process_disconnect.communicate()
             connected = False
         elif system_os == 'Linux':
+            num = subprocess.check_output(['nmcli', 'connection']).decode().split('\n')[1].split(' ')[1]
             process_disconnect = subprocess.Popen(
-                'nmcli con down "' + general['wifi_ssid'] + '"',
+                'nmcli con down "' + general['wifi_ssid'] + ' ' + num + '"',
                 shell=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE)
@@ -262,6 +279,8 @@ def get_next_action(json_data):
             logger.info('[I] Car reached target!')
             if bot is not None:
                 bot.set_motor(1, 0)
+                bot.set_motor(1, 0)
+                bot.set_motor(2, 0)
                 bot.set_motor(2, 0)
                 if 'u' != current_direction:
                     # Return transbot to default direction
@@ -323,11 +342,17 @@ def rotate(new_direction):
         direction = 1
 
     bot.set_motor(1, direction * int(general['motor_speed']))
+    bot.set_motor(1, direction * int(general['motor_speed']))
+    bot.set_motor(2, -direction * int(general['motor_speed']))
     bot.set_motor(2, -direction * int(general['motor_speed']))
 
-    time.sleep(float(degrees/100))
+    # rotate_time = 19.344 * pow(int(general['motor_speed'])-15, -0.853)
+    rotate_time = 14.205 * pow(int(general['motor_speed'])-15, -0.802)
+    time.sleep(rotate_time * degrees / 90)
 
     bot.set_motor(1, 0)
+    bot.set_motor(1, 0)
+    bot.set_motor(2, 0)
     bot.set_motor(2, 0)
 
 
@@ -390,6 +415,8 @@ def server_conn():
                 # Move to next point
                 if bot is not None:
                     bot.set_motor(1, int(general['motor_speed']))
+                    bot.set_motor(1, int(general['motor_speed']))
+                    bot.set_motor(2, int(general['motor_speed']))
                     bot.set_motor(2, int(general['motor_speed']))
                 if gps is not None:
                     while gps.distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
@@ -462,7 +489,7 @@ def main():
             gps = GPS()
 
         if system_os == 'Linux':
-            transbot_if = input('[?] Is this device a Transbot? Y/n: (Y)')
+            transbot_if = input('[?] Is this device a Transbot? Y/n: (Y) ')
             if transbot_if != 'n' and transbot_if != 'N':
                 from Transbot_Lib import Transbot
                 bot = Transbot()
@@ -489,6 +516,8 @@ def main():
         logger.info('[!] Ending...')
         if bot is not None:
             bot.set_motor(1, 0)
+            bot.set_motor(1, 0)
+            bot.set_motor(2, 0)
             bot.set_motor(2, 0)
             if 'u' != current_direction:
                 # Return transbot to default direction
