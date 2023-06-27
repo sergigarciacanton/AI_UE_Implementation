@@ -176,10 +176,6 @@ def disconnect(starting):
     global previous_node
     try:
         if not starting and connected:
-            if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
-                os.system("sudo screen -S ue-stream -X stuff '^C\n'")
-            elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
-                os.system("taskkill /im vlc.exe")
             message = json.dumps(dict(type="bye"))  # take input
             client_socket.send(message.encode())  # send message
             client_socket.recv(1024).decode()  # receive response
@@ -496,9 +492,7 @@ def main():
             gps = GPS()
 
         if system_os == 'Linux':
-            video_if = input('[?] Want to consume a video stream? (requires gstreamer) Y/n: (n)')
-            if video_if == 'y' or video_if == 'Y':
-                os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i  " + general['video_link'])
+            video_if = input('[?] Want to consume a video stream? (requires gstreamer) Y/n: (n) ')
             transbot_if = input('[?] Is this device a Transbot? Y/n: (Y) ')
             if transbot_if != 'n' and transbot_if != 'N':
                 from Transbot_Lib import Transbot
@@ -509,7 +503,6 @@ def main():
                 os.system("vlc " + general['video_link'])
 
         # In case of being connected to a network, disconnect
-        print('HOLA')
         disconnect(True)
 
         # Get the best FEC in terms of power and connect to it
@@ -517,6 +510,9 @@ def main():
             time.sleep(2)
             best_mac = get_mac_to_connect()
         connect(best_mac)
+
+        if video_if == 'y' or video_if == 'Y':
+            os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i  " + general['video_link'])
 
         # Loop asking for best FEC to connect and managing handovers
         while True:
@@ -538,9 +534,32 @@ def main():
                 # Return transbot to default direction
                 rotate('u')
                 current_direction = 'u'
+
+        if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
+            os.system("sudo screen -S ue-stream -X stuff '^C\n'")
+        elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
+            os.system("taskkill /im vlc.exe")
+
         disconnect(False)
     except Exception as e:
         logger.exception(e)
+        logger.info('[!] Ending...')
+        if bot is not None:
+            bot.set_motor(1, 0)
+            bot.set_motor(1, 0)
+            bot.set_motor(2, 0)
+            bot.set_motor(2, 0)
+            if 'u' != current_direction:
+                # Return transbot to default direction
+                rotate('u')
+                current_direction = 'u'
+
+        if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
+            os.system("sudo screen -S ue-stream -X stuff '^C\n'")
+        elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
+            os.system("taskkill /im vlc.exe")
+
+        disconnect(False)
 
 
 if __name__ == '__main__':
