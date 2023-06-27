@@ -9,6 +9,7 @@ import ctypes
 import logging
 import sys
 from colorlog import ColoredFormatter
+import os
 
 
 class VNF:
@@ -50,6 +51,7 @@ next_location = '0,0'
 gps = None
 bot = None
 current_direction = 'u'
+video_if = 'n'
 
 
 def get_data_by_console(data_type, message):
@@ -174,6 +176,10 @@ def disconnect(starting):
     global previous_node
     try:
         if not starting and connected:
+            if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
+                os.system("sudo screen -S ue-stream -X stuff '^C\n'")
+            elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
+                os.system("taskkill /im vlc.exe")
             message = json.dumps(dict(type="bye"))  # take input
             client_socket.send(message.encode())  # send message
             client_socket.recv(1024).decode()  # receive response
@@ -479,6 +485,7 @@ def main():
     global gps
     global bot
     global current_direction
+    global video_if
     try:
         # Get user_id
         user_id = get_data_by_console(int, '[*] Introduce your user ID: ')
@@ -489,12 +496,20 @@ def main():
             gps = GPS()
 
         if system_os == 'Linux':
+            video_if = input('[?] Want to consume a video stream? (requires gstreamer) Y/n: (n)')
+            if video_if == 'y' or video_if == 'Y':
+                os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i  " + general['video_link'])
             transbot_if = input('[?] Is this device a Transbot? Y/n: (Y) ')
             if transbot_if != 'n' and transbot_if != 'N':
                 from Transbot_Lib import Transbot
                 bot = Transbot()
+        elif system_os == 'Windows':
+            video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
+            if video_if == 'y' or video_if == 'Y':
+                os.system("vlc " + general['video_link'])
 
         # In case of being connected to a network, disconnect
+        print('HOLA')
         disconnect(True)
 
         # Get the best FEC in terms of power and connect to it

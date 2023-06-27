@@ -183,6 +183,8 @@ if __name__ == "__main__":
 
     kml = simplekml.Kml()
     i = 0
+    prevLat = 41.275
+    prevLon = 1.988
 
     # if all the following outputs have values, it shows the GPS module
     # was able to connect to the satellites properly
@@ -195,13 +197,16 @@ if __name__ == "__main__":
             print("Altitude: " + str(gps.getAltitude()))
             print('Speed: ' + str(gps.getSpeed()))
             # print("Distance:", gps.distance(41.275631, 1.987350, gps.getLatitude(), gps.getLongitude())*1000)
-            kml.newpoint(name=str(i), coords=[(gps.getLongitude(), gps.getLatitude())])
+            if str(gps.getLongitude()) != "-1.0" \
+                    and str(gps.getLatitude()) != "-1.0" \
+                    and gps.distance(prevLon, prevLat, gps.getLongitude(), gps.getLatitude()) < 100:
+                kml.newpoint(name=str(i), coords=[(gps.getLongitude(), gps.getLatitude())])
 
             time.sleep(1)
             gps.refresh()
             i += 1
         except KeyboardInterrupt:
-            kml.save("paseo_farolas_3.kml")
+            kml.save("kml_files/paseo_farolas_3.kml")
             break
 
     # print("Distance:", gps.distance(41.27610333333334, 1.9880499999999999,
