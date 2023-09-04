@@ -502,11 +502,13 @@ def main():
         elif system_os == 'Windows':
             video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
 
-        wireshark_if = input('[?] Capture packets with Wireshark? Y/n: (Y) ')
-        if wireshark_if != 'n' and wireshark_if != 'N':
-            script_path = os.path.dirname(os.path.realpath(__file__))
-            os.system(
-                "sudo screen -S ue-wireshark -m -d sudo wireshark -i " + general['wlan_if_name'] + " -k -w " + script_path + "/logs/ue-wireshark.pcap")
+        if system_os == 'Linux':
+            wireshark_if = input('[?] Capture packets with Wireshark? Y/n: (Y) ')
+            if wireshark_if != 'n' and wireshark_if != 'N':
+                script_path = os.path.dirname(os.path.realpath(__file__))
+                os.system(
+                    "sudo screen -S ue-wireshark -m -d sudo wireshark -i " + general['wlan_if_name'] + " -k -w " +
+                    script_path + "/logs/ue-wireshark.pcap")
         # In case of being connected to a network, disconnect
         disconnect(True)
 
@@ -552,7 +554,7 @@ def main():
 
         disconnect(False)
 
-        if wireshark_if != 'n' and wireshark_if != 'N':
+        if system_os == 'Linux' and wireshark_if != 'n' and wireshark_if != 'N':
             os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
 
     except Exception as e:
