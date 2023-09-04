@@ -51,6 +51,7 @@ next_location = '0,0'
 gps = None
 bot = None
 current_direction = 'u'
+wireshark_if = 'Y'
 video_if = 'n'
 
 
@@ -116,7 +117,7 @@ def get_mac_to_connect():
             iwlist_scan = subprocess.check_output(['sudo', 'iwlist', 'wlan0', 'scan'],
                                                   stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
-            logger.error('[!] Unexpected error:', e)
+            logger.error('[!] Unexpected error:' + str(e))
         else:
             iwlist_scan = iwlist_scan.decode('utf-8').split('Address: ')
             i = 1
@@ -136,21 +137,21 @@ def get_mac_to_connect():
             best_pow_mac = ""
             while val < len(data):
                 logger.debug('[D] ' + data[val])
-                splitted_data = data[val].split(' ')
+                split_data = data[val].split(' ')
                 i = 0
-                while i < len(splitted_data):
-                    if splitted_data[i] == '':
-                        splitted_data.pop(i)
+                while i < len(split_data):
+                    if split_data[i] == '':
+                        split_data.pop(i)
                     else:
                         i += 1
-                if splitted_data[0] != general['wifi_ssid']:
+                if split_data[0] != general['wifi_ssid']:
                     pass
                 else:
-                    if int(splitted_data[2]) > best_pow:
-                        best_pow = int(splitted_data[2])
-                        best_pow_mac = splitted_data[1]
-                    if best_mac == splitted_data[1]:
-                        current_pow = int(splitted_data[2])
+                    if int(split_data[2]) > best_pow:
+                        best_pow = int(split_data[2])
+                        best_pow_mac = split_data[1]
+                    if best_mac == split_data[1]:
+                        current_pow = int(split_data[2])
                 val += 1
             if current_pow < best_pow - 5:
                 return best_pow_mac
@@ -481,6 +482,7 @@ def main():
     global gps
     global bot
     global current_direction
+    global wireshark_if
     global video_if
     try:
         # Get user_id
@@ -499,9 +501,12 @@ def main():
                 bot = Transbot()
         elif system_os == 'Windows':
             video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
-            if video_if == 'y' or video_if == 'Y':
-                os.system("vlc " + general['video_link'])
 
+        wireshark_if = input('[?] Capture packets with Wireshark? Y/n: (Y) ')
+        if wireshark_if != 'n' and wireshark_if != 'N':
+            script_path = os.path.dirname(os.path.realpath(__file__))
+            os.system(
+                "sudo screen -S ue-wireshark -m -d sudo wireshark -i " + general['wlan_if_name'] + " -k -w " + script_path + "/logs/ue-wireshark.pcap")
         # In case of being connected to a network, disconnect
         disconnect(True)
 
@@ -509,11 +514,16 @@ def main():
         while best_mac == "":
             time.sleep(2)
             best_mac = get_mac_to_connect()
+
         connect(best_mac)
 
-        if video_if == 'y' or video_if == 'Y':
-            os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i  " + general['video_link'])
-
+        if system_os == 'Linux':
+            if video_if == 'y' or video_if == 'Y':
+                os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i "
+                          "http://rdmedia.bbc.co.uk/testcard/vod/manifests/avc-ctv-en-http.mpd")
+        elif system_os == 'Windows':
+            if video_if == 'y' or video_if == 'Y':
+                os.system("vlc " + general['video_link'])
         # Loop asking for best FEC to connect and managing handovers
         while True:
             new_mac = get_mac_to_connect()
@@ -541,6 +551,10 @@ def main():
             os.system("taskkill /im vlc.exe")
 
         disconnect(False)
+
+        if wireshark_if != 'n' and wireshark_if != 'N':
+            os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
+
     except Exception as e:
         logger.exception(e)
         logger.info('[!] Ending...')
@@ -560,6 +574,9 @@ def main():
             os.system("taskkill /im vlc.exe")
 
         disconnect(False)
+
+        if wireshark_if != 'n' and wireshark_if != 'N':
+            os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
 
 
 if __name__ == '__main__':
