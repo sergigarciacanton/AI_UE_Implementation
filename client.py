@@ -10,6 +10,9 @@ import logging
 import sys
 from colorlog import ColoredFormatter
 import os
+from dronekit import connect, VehicleMode
+import dronekit
+import math
 
 
 class VNF:
@@ -48,11 +51,11 @@ my_vnf = None
 previous_node = -1
 next_node = -1
 next_location = '0,0'
-gps = None
-bot = None
-current_direction = 'u'
 wireshark_if = 'Y'
 video_if = 'n'
+rover_if = 'Y'
+vehicle = None
+vehicle_active = False
 
 
 def get_data_by_console(data_type, message):
@@ -168,7 +171,7 @@ def handover(mac):
     # Function that handles handovers. First disconnects from current FEC and after connects to the new one
     logger.info('[I] Performing handover to ' + mac)
     disconnect(False)
-    connect(mac)
+    wifi_connect(mac)
 
 
 def disconnect(starting):
@@ -209,7 +212,7 @@ def disconnect(starting):
         logger.exception(e)
 
 
-def connect(mac):
+def wifi_connect(mac):
     # This function manages connecting to a new FEC given its MAC address
     global connected
     global server_thread
@@ -268,95 +271,15 @@ def generate_vnf():
                     current_node=source, fec_linked=fec_id, user_id=user_id))
 
 
-def get_next_action(json_data):
-    global next_node
-    global next_location
-    global my_vnf
-    global current_direction
-    logger.info('[I] Response from server: ' + str(json_data))
-    if json_data['res'] == 200:
-        next_node = json_data['next_node']
-        if gps is not None:
-            next_location = json_data['location']
-        if json_data['action'] == 'e':
-            logger.info('[I] Car reached target!')
-            if bot is not None:
-                bot.set_motor(1, 0)
-                bot.set_motor(1, 0)
-                bot.set_motor(2, 0)
-                bot.set_motor(2, 0)
-                if 'u' != current_direction:
-                    # Return transbot to default direction
-                    rotate('u')
-                    current_direction = 'u'
-            key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
-            if key_in != 'n':
-                my_vnf = None
-                return False, False
-            else:
-                my_vnf = None
-                return True, True
-        else:
-            return True, False
-    elif json_data['res'] == 403:
-        my_vnf = None
-        logger.error('[!] Error! Required resources are not available on current FEC. '
-                     'Ask for less resources.')
-        return False, False
-    elif json_data['res'] == 404:
-        my_vnf = None
-        logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
-        return False, False
-    else:
-        my_vnf = None
-        logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
-        return False, False
-
-
-def rotate(new_direction):
-    if new_direction == 'r':
-        fin_degrees = 90
-    elif new_direction == 'd':
-        fin_degrees = 180
-    elif new_direction == 'l':
-        fin_degrees = 270
-    else:
-        fin_degrees = 0
-
-    if current_direction == 'r':
-        current_degrees = 90
-    elif current_direction == 'd':
-        current_degrees = 180
-    elif current_direction == 'l':
-        current_degrees = 270
-    else:
-        current_degrees = 0
-
-    degrees = fin_degrees - current_degrees
-    if degrees > 180:
-        degrees = degrees - 360
-    elif degrees < -180:
-        degrees = degrees + 360
-
-    if degrees < 0:
-        degrees = degrees * -1
-        direction = -1
-    else:
-        direction = 1
-
-    bot.set_motor(1, direction * int(general['motor_speed']))
-    bot.set_motor(1, direction * int(general['motor_speed']))
-    bot.set_motor(2, -direction * int(general['motor_speed']))
-    bot.set_motor(2, -direction * int(general['motor_speed']))
-
-    # rotate_time = 19.344 * pow(int(general['motor_speed'])-15, -0.853)
-    rotate_time = 14.205 * pow(int(general['motor_speed'])-15, -0.802)
-    time.sleep(rotate_time * degrees / 90)
-
-    bot.set_motor(1, 0)
-    bot.set_motor(1, 0)
-    bot.set_motor(2, 0)
-    bot.set_motor(2, 0)
+def distance(lat1, lng1, lat2, lng2):
+    # Finds the distance between two sets of coordinates
+    deg_to_rad = math.pi / 180
+    dLat = (lat1 - lat2) * deg_to_rad
+    dLng = (lng1 - lng2) * deg_to_rad
+    a = pow(math.sin(dLat / 2), 2) + math.cos(lat1 * deg_to_rad) * \
+        math.cos(lat2 * deg_to_rad) * pow(math.sin(dLng / 2), 2)
+    b = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return 6371 * b
 
 
 def server_conn():
@@ -368,8 +291,8 @@ def server_conn():
     global user_id
     global next_node
     global next_location
-    global bot
-    global current_direction
+    global vehicle
+    global vehicle_active
     host = general['fec_ip']
     port = int(general['fec_port'])  # socket server port number
     try:
@@ -401,35 +324,64 @@ def server_conn():
             stop = False
             if my_vnf is None:
                 valid_vnf = False
-                json_data = dict()
                 while not valid_vnf:
                     my_vnf = generate_vnf()
                     message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
                     client_socket.send(message.encode())  # send message
                     data = client_socket.recv(1024).decode()  # receive response
                     json_data = json.loads(data)
-                    valid_vnf, stop = get_next_action(json_data)
-                if bot is not None:
-                    if json_data['action'] != current_direction:
-                        # Need to rotate transbot first
-                        rotate(json_data['action'])
-                        current_direction = json_data['action']
+                    logger.info('[I] Response from server: ' + str(json_data))
+                    if json_data['res'] == 200:
+                        next_node = json_data['next_node']
+                        if vehicle is not None:
+                            next_location = json_data['location']
+                        if json_data['action'] == 'e':
+                            logger.info('[I] Car reached target!')
+                            key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
+                            if key_in != 'n':
+                                my_vnf = None
+                                valid_vnf = False
+                                stop = False
+                            else:
+                                my_vnf = None
+                                valid_vnf = True
+                                stop = True
+                        else:
+                            valid_vnf = True
+                            stop = False
+                    elif json_data['res'] == 403:
+                        my_vnf = None
+                        logger.error('[!] Error! Required resources are not available on current FEC. '
+                                     'Ask for less resources.')
+                        valid_vnf = False
+                        stop = False
+                    elif json_data['res'] == 404:
+                        my_vnf = None
+                        logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                        valid_vnf = False
+                        stop = False
+                    else:
+                        my_vnf = None
+                        logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                        valid_vnf = False
+                        stop = False
             while my_vnf is not None:
                 # Move to next point
-                if bot is not None:
-                    bot.set_motor(1, int(general['motor_speed']))
-                    bot.set_motor(1, int(general['motor_speed']))
-                    bot.set_motor(2, int(general['motor_speed']))
-                    bot.set_motor(2, int(general['motor_speed']))
-                if gps is not None:
-                    while gps.distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
-                                       gps.getLatitude(), gps.getLongitude()) > 2:
+                if vehicle is not None and vehicle_active is False:
+                    point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
+                                                    float(next_location.split(',')[1]), 0)
+                    vehicle.simple_goto(point, 1)
+                    vehicle_active = True
+                elif vehicle is not None and vehicle_active is True:
+                    while distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
+                                   vehicle.location.global_frame.lat,
+                                   vehicle.location.global_frame.lon) > 3:
                         time.sleep(1)
                 else:
                     input('[*] Press Enter when getting to the next point...')
 
                 # Update state vector
-                logger.info('[I] Reached next point! Sending changes to FEC...')
+                logger.info('[I] Reaching next point! Sending changes to FEC...')
                 my_vnf.previous_node = my_vnf.current_node
                 my_vnf.current_node = next_node
                 my_vnf.fec_linked = fec_id
@@ -440,11 +392,48 @@ def server_conn():
                 client_socket.send(message.encode())  # send message
                 data = client_socket.recv(1024).decode()  # receive response
                 json_data = json.loads(data)
-                valid_vnf, stop = get_next_action(json_data)
+                logger.info('[I] Response from server: ' + str(json_data))
+                if json_data['res'] == 200:
+                    next_node = json_data['next_node']
+                    if vehicle is not None:
+                        next_location = json_data['location']
+                    if json_data['action'] == 'e':
+                        logger.info('[I] Car reached target!')
+                        key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
+                        if key_in != 'n':
+                            my_vnf = None
+                            stop = False
+                        else:
+                            my_vnf = None
+                            stop = True
+                    else:
+                        stop = False
+                        if vehicle is not None and vehicle_active is True:
+                            while distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
+                                           vehicle.location.global_frame.lat,
+                                           vehicle.location.global_frame.lon) > 1:
+                                time.sleep(1)
+                            point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
+                                                            float(next_location.split(',')[1]), 0)
+                            vehicle.simple_goto(point, 1)
+                elif json_data['res'] == 403:
+                    my_vnf = None
+                    logger.error('[!] Error! Required resources are not available on current FEC. '
+                                 'Ask for less resources.')
+                    stop = False
+                elif json_data['res'] == 404:
+                    my_vnf = None
+                    logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                    stop = False
+                else:
+                    my_vnf = None
+                    logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                    stop = False
             if stop:
                 break
-        while True:
-            time.sleep(1)
+        message = json.dumps(dict(type="bye"))  # take input
+        client_socket.send(message.encode())  # send message
+        client_socket.close()  # close the connection
 
     except ConnectionRefusedError:
         logger.error('[!] FEC server not available! Please, press enter to stop client.')
@@ -474,33 +463,35 @@ def kill_thread(thread_id):
         logger.exception(e)
 
 
+def stop_program():
+    logger.info('[!] Ending...')
+
+    if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
+        os.system("sudo screen -S ue-stream -X stuff '^C\n'")
+    elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
+        os.system("taskkill /im vlc.exe")
+
+    disconnect(False)
+
+    if system_os == 'Linux' and wireshark_if != 'n' and wireshark_if != 'N':
+        os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
+    if rover_if is True:
+        vehicle.armed = False
+        vehicle.close()
+
+
 def main():
     # Main function
     # Global variables
     global best_mac
     global user_id
-    global gps
-    global bot
-    global current_direction
     global wireshark_if
     global video_if
+    global rover_if
+    global vehicle
     try:
         # Get user_id
         user_id = get_data_by_console(int, '[*] Introduce your user ID: ')
-
-        gps_if = input('[?] Want to use GPS locations? Y/n: (n) ')
-        if gps_if == 'y' or gps_if == 'Y':
-            from gps_handler import GPS
-            gps = GPS()
-
-        if system_os == 'Linux':
-            video_if = input('[?] Want to consume a video stream? (requires gstreamer) Y/n: (n) ')
-            transbot_if = input('[?] Is this device a Transbot? Y/n: (Y) ')
-            if transbot_if != 'n' and transbot_if != 'N':
-                from Transbot_Lib import Transbot
-                bot = Transbot()
-        elif system_os == 'Windows':
-            video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
 
         if system_os == 'Linux':
             wireshark_if = input('[?] Capture packets with Wireshark? Y/n: (Y) ')
@@ -509,6 +500,24 @@ def main():
                 os.system(
                     "sudo screen -S ue-wireshark -m -d sudo wireshark -i " + general['wlan_if_name'] + " -k -w " +
                     script_path + "/logs/ue-wireshark.pcap")
+            video_if = input('[?] Want to consume a video stream? (requires gstreamer) Y/n: (n) ')
+            rover_if = input('[?] Is this device a Rover? Y/n: (Y) ')
+            if rover_if != 'n' and rover_if != 'N':
+                vehicle = connect("tcp:127.0.0.1:5762", wait_ready=True, baud=115200)
+                logger.debug("[D] Connected to vehicle")
+
+                vehicle.mode = VehicleMode("GUIDED")
+                while not vehicle.mode == VehicleMode("GUIDED"):
+                    time.sleep(1)
+                logger.debug("[D] Guided mode ready")
+
+                vehicle.armed = True
+                while not vehicle.armed:
+                    time.sleep(1)
+                logger.debug("[D] Armed vehicle")
+        elif system_os == 'Windows':
+            video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
+
         # In case of being connected to a network, disconnect
         disconnect(True)
 
@@ -517,7 +526,7 @@ def main():
             time.sleep(2)
             best_mac = get_mac_to_connect()
 
-        connect(best_mac)
+        wifi_connect(best_mac)
 
         if system_os == 'Linux':
             if video_if == 'y' or video_if == 'Y':
@@ -536,49 +545,11 @@ def main():
 
             time.sleep(2)
     except KeyboardInterrupt:
-        logger.info('[!] Ending...')
-        if bot is not None:
-            bot.set_motor(1, 0)
-            bot.set_motor(1, 0)
-            bot.set_motor(2, 0)
-            bot.set_motor(2, 0)
-            if 'u' != current_direction:
-                # Return transbot to default direction
-                rotate('u')
-                current_direction = 'u'
-
-        if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
-            os.system("sudo screen -S ue-stream -X stuff '^C\n'")
-        elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
-            os.system("taskkill /im vlc.exe")
-
-        disconnect(False)
-
-        if system_os == 'Linux' and wireshark_if != 'n' and wireshark_if != 'N':
-            os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
+        stop_program()
 
     except Exception as e:
         logger.exception(e)
-        logger.info('[!] Ending...')
-        if bot is not None:
-            bot.set_motor(1, 0)
-            bot.set_motor(1, 0)
-            bot.set_motor(2, 0)
-            bot.set_motor(2, 0)
-            if 'u' != current_direction:
-                # Return transbot to default direction
-                rotate('u')
-                current_direction = 'u'
-
-        if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
-            os.system("sudo screen -S ue-stream -X stuff '^C\n'")
-        elif system_os == 'Windows' and video_if == 'y' or video_if == 'Y':
-            os.system("taskkill /im vlc.exe")
-
-        disconnect(False)
-
-        if wireshark_if != 'n' and wireshark_if != 'N':
-            os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
+        stop_program()
 
 
 if __name__ == '__main__':
