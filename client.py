@@ -2,7 +2,6 @@ import configparser
 import platform
 import subprocess
 import socket
-import threading
 import time
 import json
 import ctypes
@@ -92,6 +91,7 @@ def get_data_by_console(data_type, message):
 def get_mac_to_connect():
     # Function that returns the wireless_conn_manager the mac of the best FEC to connect.
     # Takes into account a hysteresis margin of 5 dB for changing FEC
+    # return 'ab:cd:ef:ac:cd:ef'
     if system_os == 'Windows':
         from get_rx_rssi import get_BSSI
         json_data = json.loads(str(get_BSSI()).replace("'", "\""))
@@ -101,7 +101,7 @@ def get_mac_to_connect():
             val = 0
             current_pow = -100
             while val < len(json_data):
-                logger.debug('[D] ' + str(json_data[str(val)]))
+                # logger.debug('[D] ' + str(json_data[str(val)]))
                 if int(json_data[str(val)][2]) > best_pow:
                     best_pow = int(json_data[str(val)][2])
                     best_val = val
@@ -139,7 +139,7 @@ def get_mac_to_connect():
             current_pow = -100
             best_pow_mac = ""
             while val < len(data):
-                logger.debug('[D] ' + data[val])
+                # logger.debug('[D] ' + data[val])
                 split_data = data[val].split(' ')
                 i = 0
                 while i < len(split_data):
@@ -183,8 +183,6 @@ def disconnect(starting):
             message = json.dumps(dict(type="bye"))  # take input
             client_socket.send(message.encode())  # send message
             client_socket.recv(1024).decode()  # receive response
-            kill_thread(server_thread.ident)
-            server_thread.join()
         previous_node = fec_id
         if system_os == 'Windows':
             process_disconnect = subprocess.Popen(
@@ -215,7 +213,9 @@ def disconnect(starting):
 def wifi_connect(mac):
     # This function manages connecting to a new FEC given its MAC address
     global connected
-    global server_thread
+    global client_socket
+    global fec_id
+    global user_id
     if system_os == 'Windows':
         while not connected:
             process_connect = subprocess.Popen(
@@ -253,10 +253,32 @@ def wifi_connect(mac):
         logger.critical('[!] System OS not supported! Please, stop program...')
         return
 
-    # Thread controlling communications with server on FEC
-    server_thread = threading.Thread(target=server_conn)
-    server_thread.daemon = True
-    server_thread.start()
+    host = general['fec_ip']
+    port = int(general['fec_port'])  # socket server port number
+    client_socket = socket.socket()
+    ready = False
+    while not ready:
+        try:
+            client_socket.connect((host, port))  # connect to the server
+            ready = True
+        except OSError:
+            time.sleep(1)
+    auth_valid = False  # CAMBIAR!!!
+    while not auth_valid:
+        message = json.dumps(dict(type="auth", user_id=user_id))  # take input
+
+        client_socket.send(message.encode())  # send message
+        data = client_socket.recv(1024).decode()  # receive response
+        json_data = json.loads(data)
+        if json_data['res'] == 200:
+            logger.info('[I] Successfully authenticated to FEC ' + str(json_data['id']) + '!')
+            fec_id = json_data['id']
+            auth_valid = True
+            if my_vnf is not None:
+                my_vnf.fec_linked = fec_id
+        else:
+            logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
+            user_id = get_data_by_console(int, '[*] Introduce a valid user ID: ')
 
 
 def generate_vnf():
@@ -279,173 +301,8 @@ def distance(lat1, lng1, lat2, lng2):
     a = pow(math.sin(dLat / 2), 2) + math.cos(lat1 * deg_to_rad) * \
         math.cos(lat2 * deg_to_rad) * pow(math.sin(dLng / 2), 2)
     b = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return 6371 * b
-
-
-def server_conn():
-    # This function is running on a second thread as long as being connected to a FEC.
-    # It sends data to the sockets server and waits for responses
-    global client_socket
-    global fec_id
-    global my_vnf
-    global user_id
-    global next_node
-    global next_location
-    global vehicle
-    global vehicle_active
-    host = general['fec_ip']
-    port = int(general['fec_port'])  # socket server port number
-    try:
-        client_socket = socket.socket()
-        ready = False
-        while not ready:
-            try:
-                client_socket.connect((host, port))  # connect to the server
-                ready = True
-            except OSError:
-                time.sleep(1)
-        auth_valid = False
-        while not auth_valid:
-            message = json.dumps(dict(type="auth", user_id=user_id))  # take input
-
-            client_socket.send(message.encode())  # send message
-            data = client_socket.recv(1024).decode()  # receive response
-            json_data = json.loads(data)
-            if json_data['res'] == 200:
-                logger.info('[I] Successfully authenticated to FEC ' + str(json_data['id']) + '!')
-                fec_id = json_data['id']
-                auth_valid = True
-                if my_vnf is not None:
-                    my_vnf.fec_linked = fec_id
-            else:
-                logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
-                user_id = get_data_by_console(int, '[*] Introduce a valid user ID: ')
-        while True:
-            stop = False
-            if my_vnf is None:
-                valid_vnf = False
-                while not valid_vnf:
-                    my_vnf = generate_vnf()
-                    message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
-                    client_socket.send(message.encode())  # send message
-                    data = client_socket.recv(1024).decode()  # receive response
-                    json_data = json.loads(data)
-                    logger.info('[I] Response from server: ' + str(json_data))
-                    if json_data['res'] == 200:
-                        next_node = json_data['next_node']
-                        if vehicle is not None:
-                            next_location = json_data['location']
-                        if json_data['action'] == 'e':
-                            logger.info('[I] Car reached target!')
-                            key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
-                            if key_in != 'n':
-                                my_vnf = None
-                                valid_vnf = False
-                                stop = False
-                            else:
-                                my_vnf = None
-                                valid_vnf = True
-                                stop = True
-                        else:
-                            valid_vnf = True
-                            stop = False
-                    elif json_data['res'] == 403:
-                        my_vnf = None
-                        logger.error('[!] Error! Required resources are not available on current FEC. '
-                                     'Ask for less resources.')
-                        valid_vnf = False
-                        stop = False
-                    elif json_data['res'] == 404:
-                        my_vnf = None
-                        logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
-                        valid_vnf = False
-                        stop = False
-                    else:
-                        my_vnf = None
-                        logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
-                        valid_vnf = False
-                        stop = False
-            while my_vnf is not None:
-                # Move to next point
-                if vehicle is not None and vehicle_active is False:
-                    point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
-                                                    float(next_location.split(',')[1]), 0)
-                    vehicle.simple_goto(point, 1)
-                    vehicle_active = True
-                elif vehicle is not None and vehicle_active is True:
-                    while distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
-                                   vehicle.location.global_frame.lat,
-                                   vehicle.location.global_frame.lon) > 3:
-                        time.sleep(1)
-                else:
-                    input('[*] Press Enter when getting to the next point...')
-
-                # Update state vector
-                logger.info('[I] Reaching next point! Sending changes to FEC...')
-                my_vnf.previous_node = my_vnf.current_node
-                my_vnf.current_node = next_node
-                my_vnf.fec_linked = fec_id
-                message = json.dumps(dict(type="state", data=dict(previous_node=my_vnf.previous_node,
-                                                                  current_node=my_vnf.current_node,
-                                                                  fec_linked=my_vnf.fec_linked,
-                                                                  user_id=my_vnf.user_id)))
-                client_socket.send(message.encode())  # send message
-                data = client_socket.recv(1024).decode()  # receive response
-                json_data = json.loads(data)
-                logger.info('[I] Response from server: ' + str(json_data))
-                if json_data['res'] == 200:
-                    next_node = json_data['next_node']
-                    if vehicle is not None:
-                        next_location = json_data['location']
-                    if json_data['action'] == 'e':
-                        logger.info('[I] Car reached target!')
-                        key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
-                        if key_in != 'n':
-                            my_vnf = None
-                            stop = False
-                        else:
-                            my_vnf = None
-                            stop = True
-                    else:
-                        stop = False
-                        if vehicle is not None and vehicle_active is True:
-                            while distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
-                                           vehicle.location.global_frame.lat,
-                                           vehicle.location.global_frame.lon) > 1:
-                                time.sleep(1)
-                            point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
-                                                            float(next_location.split(',')[1]), 0)
-                            vehicle.simple_goto(point, 1)
-                elif json_data['res'] == 403:
-                    my_vnf = None
-                    logger.error('[!] Error! Required resources are not available on current FEC. '
-                                 'Ask for less resources.')
-                    stop = False
-                elif json_data['res'] == 404:
-                    my_vnf = None
-                    logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
-                    stop = False
-                else:
-                    my_vnf = None
-                    logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
-                    stop = False
-            if stop:
-                break
-        message = json.dumps(dict(type="bye"))  # take input
-        client_socket.send(message.encode())  # send message
-        client_socket.close()  # close the connection
-
-    except ConnectionRefusedError:
-        logger.error('[!] FEC server not available! Please, press enter to stop client.')
-    except SystemExit:
-        message = json.dumps(dict(type="bye"))  # take input
-        client_socket.send(message.encode())  # send message
-        client_socket.close()  # close the connection
-    except Exception as e:
-        logger.exception(e)
-
-
-server_thread = threading.Thread(target=server_conn)
+    print(6371000 * b)
+    return 6371000 * b
 
 
 def kill_thread(thread_id):
@@ -464,6 +321,7 @@ def kill_thread(thread_id):
 
 
 def stop_program():
+    global rover_if
     logger.info('[!] Ending...')
 
     if system_os == 'Linux' and video_if == 'y' or video_if == 'Y':
@@ -475,7 +333,8 @@ def stop_program():
 
     if system_os == 'Linux' and wireshark_if != 'n' and wireshark_if != 'N':
         os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
-    if rover_if is True:
+    if system_os == 'Linux' and rover_if != 'n' and rover_if != 'N':
+        logger.debug('[D] Disarming vehicle...')
         vehicle.armed = False
         vehicle.close()
 
@@ -489,6 +348,12 @@ def main():
     global video_if
     global rover_if
     global vehicle
+    global client_socket
+    global fec_id
+    global my_vnf
+    global next_node
+    global next_location
+    global vehicle_active
     try:
         # Get user_id
         user_id = get_data_by_console(int, '[*] Introduce your user ID: ')
@@ -515,7 +380,7 @@ def main():
                 while not vehicle.armed:
                     time.sleep(1)
                 logger.debug("[D] Armed vehicle")
-        elif system_os == 'Windows':
+        if system_os == 'Windows':
             video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
 
         # In case of being connected to a network, disconnect
@@ -535,18 +400,178 @@ def main():
         elif system_os == 'Windows':
             if video_if == 'y' or video_if == 'Y':
                 os.system("vlc " + general['video_link'])
-        # Loop asking for best FEC to connect and managing handovers
-        while True:
-            new_mac = get_mac_to_connect()
-            if new_mac != best_mac:
-                best_mac = new_mac
-                if connected:
-                    handover(best_mac)
 
-            time.sleep(2)
+        try:
+            # iterator = 0
+            while True:
+                stop = False
+                if my_vnf is None:
+                    valid_vnf = False
+                    while not valid_vnf:
+                        my_vnf = generate_vnf()
+                        message = json.dumps(dict(type="vnf", data=my_vnf.__dict__))  # take input
+                        client_socket.send(message.encode())  # send message
+                        data = client_socket.recv(1024).decode()  # receive response
+                        json_data = json.loads(data)
+                        logger.info('[I] Response from server: ' + str(json_data))
+                        # if iterator == 0:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942',
+                        #                      action='l')
+                        # elif iterator == 1:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076',
+                        #                      action='u')
+                        # elif iterator == 2:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253',
+                        #                      action='l')
+                        # elif iterator == 3:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
+                        #                      action='d')
+                        # else:
+                        #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
+                        #                      action='e')
+                        if json_data['res'] == 200:
+                            next_node = json_data['next_node']
+                            if vehicle is not None:
+                                next_location = json_data['location']
+                            if json_data['action'] == 'e':
+                                logger.info('[I] Car reached target!')
+                                key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
+                                if key_in != 'n':
+                                    my_vnf = None
+                                    valid_vnf = False
+                                    stop = False
+                                else:
+                                    my_vnf = None
+                                    valid_vnf = True
+                                    stop = True
+                            else:
+                                valid_vnf = True
+                                stop = False
+                        elif json_data['res'] == 403:
+                            my_vnf = None
+                            logger.error('[!] Error! Required resources are not available on current FEC. '
+                                         'Ask for less resources.')
+                            valid_vnf = False
+                            stop = False
+                        elif json_data['res'] == 404:
+                            my_vnf = None
+                            logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                            valid_vnf = False
+                            stop = False
+                        else:
+                            my_vnf = None
+                            logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                            valid_vnf = False
+                            stop = False
+                while my_vnf is not None:
+                    # Move to next point
+                    if json_data['next_fec'] is not my_vnf.fec_linked:
+                        handover(json_data['fec_mac'])
+                    if vehicle is not None and vehicle_active is False:
+                        point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
+                                                        float(next_location.split(',')[1]), 0)
+                        logger.info('[I] Moving towards first target...')
+                        vehicle.simple_goto(point, 1)
+                        vehicle_active = True
+                    if vehicle is not None and vehicle_active is True:
+                        while distance(float(next_location.split(',')[0]), float(next_location.split(',')[1]),
+                                       vehicle.location.global_frame.lat,
+                                       vehicle.location.global_frame.lon) > 3:
+                            time.sleep(1)
+                    else:
+                        input('[*] Press Enter when getting to the next point...')
+
+                    # Update state vector
+                    logger.info('[I] Reaching next point! Sending changes to FEC...')
+                    my_vnf.previous_node = my_vnf.current_node
+                    my_vnf.current_node = next_node
+                    my_vnf.fec_linked = fec_id
+                    message = json.dumps(dict(type="state", data=dict(previous_node=my_vnf.previous_node,
+                                                                      current_node=my_vnf.current_node,
+                                                                      fec_linked=my_vnf.fec_linked,
+                                                                      user_id=my_vnf.user_id)))
+                    client_socket.send(message.encode())  # send message
+                    data = client_socket.recv(1024).decode()  # receive response
+                    json_data = json.loads(data)
+                    logger.info('[I] Response from server: ' + str(json_data))
+                    # if iterator == 0:
+                    #     iterator += 1
+                    #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942',
+                    #                      action='l')
+                    # elif iterator == 1:
+                    #     iterator += 1
+                    #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076',
+                    #                      action='u')
+                    # elif iterator == 2:
+                    #     iterator += 1
+                    #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253',
+                    #                      action='l')
+                    # elif iterator == 3:
+                    #     iterator += 1
+                    #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
+                    #                      action='d')
+                    # else:
+                    #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
+                    #                      action='e')
+                    if json_data['res'] == 200:
+                        next_node = json_data['next_node']
+                        if vehicle is not None:
+                            arriving_location = next_location
+                            next_location = json_data['location']
+                        if json_data['action'] == 'e':
+                            logger.info('[I] Car reached target!')
+                            key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
+                            if key_in != 'n':
+                                my_vnf = None
+                                stop = False
+                            else:
+                                my_vnf = None
+                                stop = True
+                        else:
+                            stop = False
+                            if vehicle is not None and vehicle_active is True:
+                                while distance(float(arriving_location.split(',')[0]),
+                                               float(arriving_location.split(',')[1]),
+                                               vehicle.location.global_frame.lat,
+                                               vehicle.location.global_frame.lon) > 1:
+                                    time.sleep(1)
+                                logger.info('[I] Reached next point! Loading next target...')
+                                point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
+                                                                float(next_location.split(',')[1]), 0)
+                                vehicle.simple_goto(point, 1)
+                    elif json_data['res'] == 403:
+                        my_vnf = None
+                        logger.error('[!] Error! Required resources are not available on current FEC. '
+                                     'Ask for less resources.')
+                        stop = False
+                    elif json_data['res'] == 404:
+                        my_vnf = None
+                        logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                        stop = False
+                    else:
+                        my_vnf = None
+                        logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                        stop = False
+                if stop:
+                    break
+            message = json.dumps(dict(type="bye"))  # take input
+            client_socket.send(message.encode())  # send message
+            client_socket.close()  # close the connection
+
+        except ConnectionRefusedError:
+            logger.error('[!] FEC server not available! Please, press enter to stop client.')
+        except SystemExit:
+            message = json.dumps(dict(type="bye"))  # take input
+            client_socket.send(message.encode())  # send message
+            client_socket.close()  # close the connection
+        except Exception as e:
+            logger.exception(e)
     except KeyboardInterrupt:
         stop_program()
-
     except Exception as e:
         logger.exception(e)
         stop_program()
