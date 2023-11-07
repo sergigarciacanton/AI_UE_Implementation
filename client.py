@@ -369,7 +369,7 @@ def main():
             video_if = input('[?] Want to consume a video stream? (requires gstreamer) Y/n: (n) ')
             rover_if = input('[?] Is this device a Rover? Y/n: (Y) ')
             if rover_if != 'n' and rover_if != 'N':
-                vehicle = connect("tcp:127.0.0.1:5762", wait_ready=True, baud=115200)
+                vehicle = connect(general['rover_conn'], wait_ready=True, baud=115200)
                 logger.info("[I] Connected to vehicle")
 
                 vehicle.mode = VehicleMode("GUIDED")
@@ -431,7 +431,7 @@ def main():
                         #     json_data = dict(res=200, next_node=-1, location='41.27603977014193,1.988058630277008')
                         if json_data['res'] == 200:
                             next_node = json_data['next_node']
-                            if vehicle is not None:
+                            if vehicle is not None and next_node != -1:
                                 next_location = json_data['location']
                             if json_data['next_node'] == -1:
                                 logger.info('[I] Car reached target!')
