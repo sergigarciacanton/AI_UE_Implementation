@@ -23,7 +23,8 @@ class VNF:
         self.bw = json_data['bw']
         self.previous_node = json_data['previous_node']
         self.current_node = json_data['current_node']
-        self.fec_linked = json_data['fec_linked']
+        self.cav_fec = json_data['cav_fec']
+        self.time_steps = json_data['time_steps']
         self.user_id = json_data['user_id']
 
 
@@ -263,7 +264,7 @@ def wifi_connect(mac):
             ready = True
         except OSError:
             time.sleep(1)
-    auth_valid = False  # CAMBIAR!!!
+    auth_valid = False
     while not auth_valid:
         message = json.dumps(dict(type="auth", user_id=user_id))  # take input
 
@@ -275,7 +276,7 @@ def wifi_connect(mac):
             fec_id = json_data['id']
             auth_valid = True
             if my_vnf is not None:
-                my_vnf.fec_linked = fec_id
+                my_vnf.cav_fec = fec_id
         else:
             logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
             user_id = get_data_by_console(int, '[*] Introduce a valid user ID: ')
@@ -289,8 +290,8 @@ def generate_vnf():
     ram = get_data_by_console(int, '[*] Introduce the needed RAM MB: ')
     bw = get_data_by_console(int, '[*] Introduce the needed bandwidth (Mbps): ')
 
-    return VNF(dict(source=source, target=target, gpu=gpu, ram=ram, bw=bw, previous_node=-1,
-                    current_node=source, fec_linked=fec_id, user_id=user_id))
+    return VNF(dict(source=source, target=target, gpu=gpu, ram=ram, bw=bw, previous_node=source,
+                    current_node=source, cav_fec=fec_id, time_steps=-1, user_id=user_id))
 
 
 def distance(lat1, lng1, lat2, lng2):
@@ -301,7 +302,7 @@ def distance(lat1, lng1, lat2, lng2):
     a = pow(math.sin(dLat / 2), 2) + math.cos(lat1 * deg_to_rad) * \
         math.cos(lat2 * deg_to_rad) * pow(math.sin(dLng / 2), 2)
     b = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    print(6371000 * b)
+    # print(6371000 * b)
     return 6371000 * b
 
 
@@ -369,17 +370,17 @@ def main():
             rover_if = input('[?] Is this device a Rover? Y/n: (Y) ')
             if rover_if != 'n' and rover_if != 'N':
                 vehicle = connect("tcp:127.0.0.1:5762", wait_ready=True, baud=115200)
-                logger.debug("[D] Connected to vehicle")
+                logger.info("[I] Connected to vehicle")
 
                 vehicle.mode = VehicleMode("GUIDED")
                 while not vehicle.mode == VehicleMode("GUIDED"):
                     time.sleep(1)
-                logger.debug("[D] Guided mode ready")
+                logger.info("[I] Guided mode ready")
 
                 vehicle.armed = True
                 while not vehicle.armed:
                     time.sleep(1)
-                logger.debug("[D] Armed vehicle")
+                logger.info("[I] Armed vehicle")
         if system_os == 'Windows':
             video_if = input('[?] Want to consume a video stream? (requires VLC) Y/n: (n) ')
 
@@ -416,28 +417,23 @@ def main():
                         logger.info('[I] Response from server: ' + str(json_data))
                         # if iterator == 0:
                         #     iterator += 1
-                        #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942',
-                        #                      action='l')
+                        #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942')
                         # elif iterator == 1:
                         #     iterator += 1
-                        #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076',
-                        #                      action='u')
+                        #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076')
                         # elif iterator == 2:
                         #     iterator += 1
-                        #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253',
-                        #                      action='l')
+                        #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253')
                         # elif iterator == 3:
                         #     iterator += 1
-                        #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
-                        #                      action='d')
+                        #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008')
                         # else:
-                        #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
-                        #                      action='e')
+                        #     json_data = dict(res=200, next_node=-1, location='41.27603977014193,1.988058630277008')
                         if json_data['res'] == 200:
                             next_node = json_data['next_node']
                             if vehicle is not None:
                                 next_location = json_data['location']
-                            if json_data['action'] == 'e':
+                            if json_data['next_node'] == -1:
                                 logger.info('[I] Car reached target!')
                                 key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                                 if key_in != 'n':
@@ -469,7 +465,7 @@ def main():
                             stop = False
                 while my_vnf is not None:
                     # Move to next point
-                    if json_data['next_fec'] is not my_vnf.fec_linked:
+                    if json_data['cav_fec'] is not my_vnf.cav_fec:
                         handover(json_data['fec_mac'])
                     if vehicle is not None and vehicle_active is False:
                         point = dronekit.LocationGlobal(float(next_location.split(',')[0]),
@@ -489,10 +485,11 @@ def main():
                     logger.info('[I] Reaching next point! Sending changes to FEC...')
                     my_vnf.previous_node = my_vnf.current_node
                     my_vnf.current_node = next_node
-                    my_vnf.fec_linked = fec_id
+                    my_vnf.cav_fec = fec_id
                     message = json.dumps(dict(type="state", data=dict(previous_node=my_vnf.previous_node,
                                                                       current_node=my_vnf.current_node,
-                                                                      fec_linked=my_vnf.fec_linked,
+                                                                      cav_fec=my_vnf.cav_fec,
+                                                                      time_steps=my_vnf.time_steps,
                                                                       user_id=my_vnf.user_id)))
                     client_socket.send(message.encode())  # send message
                     data = client_socket.recv(1024).decode()  # receive response
@@ -500,29 +497,24 @@ def main():
                     logger.info('[I] Response from server: ' + str(json_data))
                     # if iterator == 0:
                     #     iterator += 1
-                    #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942',
-                    #                      action='l')
+                    #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942')
                     # elif iterator == 1:
                     #     iterator += 1
-                    #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076',
-                    #                      action='u')
+                    #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076')
                     # elif iterator == 2:
                     #     iterator += 1
-                    #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253',
-                    #                      action='l')
+                    #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253')
                     # elif iterator == 3:
                     #     iterator += 1
-                    #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
-                    #                      action='d')
+                    #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008')
                     # else:
-                    #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008',
-                    #                      action='e')
+                    #     json_data = dict(res=200, next_node=-1, location='41.27603977014193,1.988058630277008')
                     if json_data['res'] == 200:
                         next_node = json_data['next_node']
-                        if vehicle is not None:
+                        if vehicle is not None and json_data['next_node'] != -1:
                             arriving_location = next_location
                             next_location = json_data['location']
-                        if json_data['action'] == 'e':
+                        if json_data['next_node'] == -1:
                             logger.info('[I] Car reached target!')
                             key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                             if key_in != 'n':
