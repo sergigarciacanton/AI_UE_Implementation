@@ -140,11 +140,11 @@ class CAV:
             logger.critical('[!] System OS not supported! Please, stop program...')
             return
 
-    def handover(self, mac):
+    def handover(self, address):
         # Function that handles handovers. First disconnects from current FEC and after connects to the new one
-        logger.info('[I] Performing handover to ' + mac)
+        logger.info('[I] Performing handover to ' + address)
         self.disconnect(False)
-        self.wifi_connect(mac)
+        self.fec_connect(address)
 
     def disconnect(self, starting):
         # Disconnects from current FEC
@@ -153,72 +153,75 @@ class CAV:
                 message = json.dumps(dict(type="bye"))  # take input
                 self.client_socket.send(message.encode())  # send message
                 self.client_socket.recv(1024).decode()  # receive response
-            self.previous_node = self.fec_id
-            if self.system_os == 'Windows':
-                process_disconnect = subprocess.Popen(
-                    'netsh wlan disconnect',
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE)
-                process_disconnect.communicate()
-                self.connected = False
-            elif self.system_os == 'Linux':
-                num = subprocess.check_output(['nmcli', 'connection']).decode().split('\n')[1].split(' ')[1]
-                process_disconnect = subprocess.Popen(
-                    'nmcli con down "' + general['wifi_ssid'] + ' ' + num + '"',
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE)
-                process_disconnect.communicate()
-                self.connected = False
-            else:
-                logger.critical('[!] System OS not supported! Please, stop program...')
-                return
+            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                if self.system_os == 'Windows':
+                    process_disconnect = subprocess.Popen(
+                        'netsh wlan disconnect',
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
+                    process_disconnect.communicate()
+                    self.connected = False
+                elif self.system_os == 'Linux':
+                    num = subprocess.check_output(['nmcli', 'connection']).decode().split('\n')[1].split(' ')[1]
+                    process_disconnect = subprocess.Popen(
+                        'nmcli con down "' + general['wifi_ssid'] + ' ' + num + '"',
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
+                    process_disconnect.communicate()
+                    self.connected = False
+                else:
+                    logger.critical('[!] System OS not supported! Please, stop program...')
+                    return
         except ConnectionResetError:
             logger.warning('[!] Trying to reuse killed connection!')
         except Exception as e:
             logger.exception(e)
 
-    def wifi_connect(self, mac):
+    def fec_connect(self, address):
         # This function manages connecting to a new FEC given its MAC address
-        if self.system_os == 'Windows':
-            while not self.connected:
-                process_connect = subprocess.Popen(
-                    general['wifi_handler_file'] + ' /ConnectAP "' + general['wifi_ssid'] + '" "' + mac + '"',
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE)
-                process_connect.communicate()
-                time.sleep(2)
-                if general['wifi_ssid'] in str(subprocess.check_output("netsh wlan show interfaces")):
-                    logger.info('[I] Connected!')
-                    self.connected = True
-                else:
-                    logger.warning('[!] Connection not established! Killing query and trying again...')
-                    process_connect.kill()
+        if general['training_if'] != 'y' and general['training_if'] != 'Y':
+            if self.system_os == 'Windows':
+                while not self.connected:
+                    process_connect = subprocess.Popen(
+                        general['wifi_handler_file'] + ' /ConnectAP "' + general['wifi_ssid'] + '" "' + address + '"',
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE)
                     process_connect.communicate()
-                    time.sleep(1)
-        elif self.system_os == 'Linux':
-            while not self.connected:
-                process_connect = subprocess.Popen('nmcli d wifi connect ' + mac + ' password 1234567890',
-                                                   shell=True,
-                                                   stdout=subprocess.PIPE,
-                                                   stderr=subprocess.PIPE)
-                process_connect.communicate()
-                time.sleep(2)
-                if general['wifi_ssid'] in str(subprocess.check_output("iwgetid")):
-                    logger.info('[I] Connected!')
-                    self.connected = True
-                else:
-                    logger.warning('[!] Connection not established! Killing query and trying again...')
-                    process_connect.kill()
+                    time.sleep(2)
+                    if general['wifi_ssid'] in str(subprocess.check_output("netsh wlan show interfaces")):
+                        logger.info('[I] Connected!')
+                        self.connected = True
+                    else:
+                        logger.warning('[!] Connection not established! Killing query and trying again...')
+                        process_connect.kill()
+                        process_connect.communicate()
+                        time.sleep(1)
+            elif self.system_os == 'Linux':
+                while not self.connected:
+                    process_connect = subprocess.Popen('nmcli d wifi connect ' + address + ' password 1234567890',
+                                                       shell=True,
+                                                       stdout=subprocess.PIPE,
+                                                       stderr=subprocess.PIPE)
                     process_connect.communicate()
-                    time.sleep(1)
-        else:
-            logger.critical('[!] System OS not supported! Please, stop program...')
-            return
+                    time.sleep(2)
+                    if general['wifi_ssid'] in str(subprocess.check_output("iwgetid")):
+                        logger.info('[I] Connected!')
+                        self.connected = True
+                    else:
+                        logger.warning('[!] Connection not established! Killing query and trying again...')
+                        process_connect.kill()
+                        process_connect.communicate()
+                        time.sleep(1)
+            else:
+                logger.critical('[!] System OS not supported! Please, stop program...')
+                return
 
-        host = general['fec_ip']
+            host = general['fec_ip']
+        else:
+            host = address
         port = int(general['fec_port'])  # socket server port number
         self.client_socket = socket.socket()
         ready = False
@@ -327,13 +330,15 @@ class CAV:
             self.disconnect(True)
 
             # Get the best FEC in terms of power and connect to it
-            best_mac = ''
-            while best_mac == '':
-                time.sleep(2)
-                best_mac = self.get_mac_to_connect()
+            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                best_mac = ''
+                while best_mac == '':
+                    time.sleep(2)
+                    best_mac = self.get_mac_to_connect()
 
-            self.wifi_connect(best_mac)
-
+                self.fec_connect(best_mac)
+            else:
+                self.fec_connect('192.168.0.2')
             if self.system_os == 'Linux':
                 if video_if == 'y' or video_if == 'Y':
                     os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i "
@@ -352,11 +357,12 @@ class CAV:
                             if general['training_if'] != 'y' and general['training_if'] != 'Y':
                                 self.my_vnf = self.generate_vnf()
                             else:
-                                self.my_vnf = dict(source=VNF().get_request()['source'],
-                                                   target=VNF().get_request()['target'], gpu=VNF().get_request()['gpu'],
-                                                   ram=VNF().get_request()['ram'], bw=VNF().get_request()['bw'],
-                                                   previous_node=VNF().get_request()['source'],
-                                                   current_node=VNF().get_request()['source'], cav_fec=self.fec_id,
+                                random_vnf = VNF().get_request()
+                                self.my_vnf = dict(source=random_vnf['source'],
+                                                   target=random_vnf['target'], gpu=random_vnf['gpu'],
+                                                   ram=random_vnf['ram'], bw=random_vnf['bw'],
+                                                   previous_node=random_vnf['source'],
+                                                   current_node=random_vnf['source'], cav_fec=self.fec_id,
                                                    time_steps=-1, user_id=self.user_id)
                             message = json.dumps(dict(type="vnf", data=self.my_vnf))  # take input
                             self.client_socket.send(message.encode())  # send message
@@ -416,8 +422,12 @@ class CAV:
                                 stop = False
                     while self.my_vnf is not None:
                         # Move to next point
-                        if json_data['cav_fec'] is not self.my_vnf['cav_fec']:
-                            self.handover(json_data['fec_mac'])
+                        if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                            if json_data['cav_fec'] is not self.my_vnf['cav_fec']:
+                                self.handover(json_data['fec_mac'])
+                        else:
+                            if json_data['cav_fec'] is not self.my_vnf['cav_fec']:
+                                self.handover(json_data['fec_ip'])
                         if self.vehicle is not None and self.vehicle_active is False:
                             point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
                                                             float(self.next_location.split(',')[1]), 0)
