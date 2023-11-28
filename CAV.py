@@ -16,7 +16,7 @@ from vnf_generator import VNF
 
 
 class CAV:
-    def __init__(self, system_os, rover):
+    def __init__(self, system_os, general, logger):
         self.system_os = system_os
         self.client_socket = None
         self.connected = False
@@ -26,8 +26,24 @@ class CAV:
         self.previous_node = None
         self.next_node = None
         self.next_location = None
-        self.vehicle = rover
+        self.logger = logger
+        if general['rover_if'] != 'n' and general['rover_if'] != 'N':
+            self.vehicle = connect(general['rover_conn'], wait_ready=True, baud=115200)
+            self.logger.info("[I] Connected to vehicle")
+
+            self.vehicle.mode = VehicleMode("GUIDED")
+            while not self.vehicle.mode == VehicleMode("GUIDED"):
+                time.sleep(1)
+            self.logger.info("[I] Guided mode ready")
+
+            self.vehicle.armed = True
+            while not self.vehicle.armed:
+                time.sleep(1)
+            self.logger.info("[I] Armed vehicle")
+        else:
+            self.vehicle = None
         self.vehicle_active = False
+        self.general = general
 
         self.start_cav()
 
@@ -41,10 +57,10 @@ class CAV:
                     output = int(input(message))
                     valid = True
                 except ValueError:
-                    logger.warning('[!] Error in introduced data! Must use int values. Try again...')
+                    self.logger.warning('[!] Error in introduced data! Must use int values. Try again...')
                     valid = False
                 except Exception as e:
-                    logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
+                    self.logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
                     valid = False
         elif data_type == float:
             while not valid:
@@ -52,13 +68,13 @@ class CAV:
                     output = float(input(message))
                     valid = True
                 except ValueError:
-                    logger.warning('[!] Error in introduced data! Must use float values. Try again...')
+                    self.logger.warning('[!] Error in introduced data! Must use float values. Try again...')
                     valid = False
                 except Exception as e:
-                    logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
+                    self.logger.warning('[!] Unexpected error ' + str(e) + '! Try again...')
                     valid = False
         else:
-            logger.error('[!] Data type getter not implemented!')
+            self.logger.error('[!] Data type getter not implemented!')
         return output
 
     def get_mac_to_connect(self):
@@ -75,7 +91,7 @@ class CAV:
                 val = 0
                 current_pow = -100
                 while val < len(json_data):
-                    # logger.debug('[D] ' + str(json_data[str(val)]))
+                    # self.logger.debug('[D] ' + str(json_data[str(val)]))
                     if int(json_data[str(val)][2]) > best_pow:
                         best_pow = int(json_data[str(val)][2])
                         best_val = val
@@ -94,7 +110,7 @@ class CAV:
                 iwlist_scan = subprocess.check_output(['sudo', 'iwlist', 'wlan0', 'scan'],
                                                       stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
-                logger.error('[!] Unexpected error:' + str(e))
+                self.logger.error('[!] Unexpected error:' + str(e))
             else:
                 iwlist_scan = iwlist_scan.decode('utf-8').split('Address: ')
                 i = 1
@@ -113,7 +129,7 @@ class CAV:
                 current_pow = -100
                 best_pow_mac = ""
                 while val < len(data):
-                    # logger.debug('[D] ' + data[val])
+                    # self.logger.debug('[D] ' + data[val])
                     split_data = data[val].split(' ')
                     i = 0
                     while i < len(split_data):
@@ -137,12 +153,12 @@ class CAV:
             else:
                 return best_mac
         else:
-            logger.critical('[!] System OS not supported! Please, stop program...')
+            self.logger.critical('[!] System OS not supported! Please, stop program...')
             return
 
     def handover(self, address):
         # Function that handles handovers. First disconnects from current FEC and after connects to the new one
-        logger.info('[I] Performing handover to ' + address)
+        self.logger.info('[I] Performing handover to ' + address)
         self.disconnect(False)
         self.fec_connect(address)
 
@@ -172,12 +188,12 @@ class CAV:
                     process_disconnect.communicate()
                     self.connected = False
                 else:
-                    logger.critical('[!] System OS not supported! Please, stop program...')
+                    self.logger.critical('[!] System OS not supported! Please, stop program...')
                     return
         except ConnectionResetError:
-            logger.warning('[!] Trying to reuse killed connection!')
+            self.logger.warning('[!] Trying to reuse killed connection!')
         except Exception as e:
-            logger.exception(e)
+            self.logger.exception(e)
 
     def fec_connect(self, address):
         # This function manages connecting to a new FEC given its MAC address
@@ -192,10 +208,10 @@ class CAV:
                     process_connect.communicate()
                     time.sleep(2)
                     if general['wifi_ssid'] in str(subprocess.check_output("netsh wlan show interfaces")):
-                        logger.info('[I] Connected!')
+                        self.logger.info('[I] Connected!')
                         self.connected = True
                     else:
-                        logger.warning('[!] Connection not established! Killing query and trying again...')
+                        self.logger.warning('[!] Connection not established! Killing query and trying again...')
                         process_connect.kill()
                         process_connect.communicate()
                         time.sleep(1)
@@ -208,15 +224,15 @@ class CAV:
                     process_connect.communicate()
                     time.sleep(2)
                     if general['wifi_ssid'] in str(subprocess.check_output("iwgetid")):
-                        logger.info('[I] Connected!')
+                        self.logger.info('[I] Connected!')
                         self.connected = True
                     else:
-                        logger.warning('[!] Connection not established! Killing query and trying again...')
+                        self.logger.warning('[!] Connection not established! Killing query and trying again...')
                         process_connect.kill()
                         process_connect.communicate()
                         time.sleep(1)
             else:
-                logger.critical('[!] System OS not supported! Please, stop program...')
+                self.logger.critical('[!] System OS not supported! Please, stop program...')
                 return
 
             host = general['fec_ip']
@@ -239,13 +255,13 @@ class CAV:
             data = self.client_socket.recv(1024).decode()  # receive response
             json_data = json.loads(data)
             if json_data['res'] == 200:
-                logger.info('[I] Successfully authenticated to FEC ' + str(json_data['id']) + '!')
+                self.logger.info('[I] Successfully authenticated to FEC ' + str(json_data['id']) + '!')
                 self.fec_id = json_data['id']
                 auth_valid = True
                 if self.my_vnf is not None:
                     self.my_vnf['cav_fec'] = self.fec_id
             else:
-                logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
+                self.logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
                 if general['training_if'] != 'y' and general['training_if'] != 'Y':
                     self.user_id = self.get_data_by_console(int, '[*] Introduce a valid user ID: ')
                 else:
@@ -282,12 +298,12 @@ class CAV:
             elif ret > 1:
                 ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
                 raise SystemError("PyThreadState_SetAsyncExc failed")
-            logger.debug("[D] Successfully killed thread " + str(thread_id))
+            self.logger.debug("[D] Successfully killed thread " + str(thread_id))
         except Exception as e:
-            logger.exception(e)
+            self.logger.exception(e)
 
     def stop_program(self):
-        logger.info('[!] Ending...')
+        self.logger.info('[!] Ending...')
 
         if self.system_os == 'Linux' and general['video_if'] == 'y' or general['video_if'] == 'Y':
             os.system("sudo screen -S ue-stream -X stuff '^C\n'")
@@ -299,7 +315,7 @@ class CAV:
         if self.system_os == 'Linux' and general['wireshark_if'] != 'n' and general['wireshark_if'] != 'N':
             os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
         if self.system_os == 'Linux' and general['rover_if'] != 'n' and general['rover_if'] != 'N':
-            logger.debug('[D] Disarming vehicle...')
+            self.logger.debug('[D] Disarming vehicle...')
             self.vehicle.armed = False
             self.vehicle.close()
 
@@ -323,7 +339,7 @@ class CAV:
             elif self.system_os == 'Windows':
                 video_if = general['video_if']
             else:
-                logger.critical('[!] System OS not supported!')
+                self.logger.critical('[!] System OS not supported!')
                 exit(-1)
 
             # In case of being connected to a network, disconnect
@@ -368,7 +384,7 @@ class CAV:
                             self.client_socket.send(message.encode())  # send message
                             data = self.client_socket.recv(1024).decode()  # receive response
                             json_data = json.loads(data)
-                            logger.info('[I] Response from server: ' + str(json_data))
+                            self.logger.info('[I] Response from server: ' + str(json_data))
                             # if iterator == 0:
                             #     iterator += 1
                             #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942')
@@ -388,7 +404,7 @@ class CAV:
                                 if self.vehicle is not None and self.next_node != -1:
                                     self.next_location = json_data['location']
                                 if json_data['next_node'] == -1:
-                                    logger.info('[I] Car reached target!')
+                                    self.logger.info('[I] Car reached target!')
                                     if general['training_if'] != 'y' and general['training_if'] != 'Y':
                                         key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                                     else:
@@ -406,18 +422,18 @@ class CAV:
                                     stop = False
                             elif json_data['res'] == 403:
                                 self.my_vnf = None
-                                logger.error('[!] Error! Required resources are not available on current FEC. '
+                                self.logger.error('[!] Error! Required resources are not available on current FEC. '
                                              'Ask for less resources.')
                                 valid_vnf = False
                                 stop = False
                             elif json_data['res'] == 404:
                                 self.my_vnf = None
-                                logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                                self.logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
                                 valid_vnf = False
                                 stop = False
                             else:
                                 self.my_vnf = None
-                                logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                                self.logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
                                 valid_vnf = False
                                 stop = False
                     while self.my_vnf is not None:
@@ -431,7 +447,7 @@ class CAV:
                         if self.vehicle is not None and self.vehicle_active is False:
                             point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
                                                             float(self.next_location.split(',')[1]), 0)
-                            logger.info('[I] Moving towards first target...')
+                            self.logger.info('[I] Moving towards first target...')
                             self.vehicle.simple_goto(point, 1)
                             self.vehicle_active = True
                         if self.vehicle is not None and self.vehicle_active is True:
@@ -445,7 +461,7 @@ class CAV:
                                 input('[*] Press Enter when getting to the next point...')
 
                         # Update state vector
-                        logger.info('[I] Reaching next point! Sending changes to FEC...')
+                        self.logger.info('[I] Reaching next point! Sending changes to FEC...')
                         self.my_vnf['previous_node'] = self.my_vnf['current_node']
                         self.my_vnf['current_node'] = self.next_node
                         self.my_vnf['cav_fec'] = self.fec_id
@@ -457,7 +473,7 @@ class CAV:
                         self.client_socket.send(message.encode())  # send message
                         data = self.client_socket.recv(1024).decode()  # receive response
                         json_data = json.loads(data)
-                        logger.info('[I] Response from server: ' + str(json_data))
+                        self.logger.info('[I] Response from server: ' + str(json_data))
                         # if iterator == 0:
                         #     iterator += 1
                         #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942')
@@ -478,7 +494,7 @@ class CAV:
                                 arriving_location = self.next_location
                                 self.next_location = json_data['location']
                             if json_data['next_node'] == -1:
-                                logger.info('[I] Car reached target!')
+                                self.logger.info('[I] Car reached target!')
                                 if general['training_if'] != 'y' and general['training_if'] != 'Y':
                                     key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                                 else:
@@ -497,22 +513,22 @@ class CAV:
                                                         self.vehicle.location.global_frame.lat,
                                                         self.vehicle.location.global_frame.lon) > 1:
                                         time.sleep(1)
-                                    logger.info('[I] Reached next point! Loading next target...')
+                                    self.logger.info('[I] Reached next point! Loading next target...')
                                     point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
                                                                     float(self.next_location.split(',')[1]), 0)
                                     self.vehicle.simple_goto(point, 1)
                         elif json_data['res'] == 403:
                             self.my_vnf = None
-                            logger.error('[!] Error! Required resources are not available on current FEC. '
+                            self.logger.error('[!] Error! Required resources are not available on current FEC. '
                                          'Ask for less resources.')
                             stop = False
                         elif json_data['res'] == 404:
                             self.my_vnf = None
-                            logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                            self.logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
                             stop = False
                         else:
                             self.my_vnf = None
-                            logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                            self.logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
                             stop = False
                     if stop:
                         break
@@ -521,17 +537,17 @@ class CAV:
                 self.client_socket.close()  # close the connection
 
             except ConnectionRefusedError:
-                logger.error('[!] FEC server not available! Please, press enter to stop client.')
+                self.logger.error('[!] FEC server not available! Please, press enter to stop client.')
             except SystemExit:
                 message = json.dumps(dict(type="bye"))  # take input
                 self.client_socket.send(message.encode())  # send message
                 self.client_socket.close()  # close the connection
             except Exception as e:
-                logger.exception(e)
+                self.logger.exception(e)
         except KeyboardInterrupt:
             self.stop_program()
         except Exception as e:
-            logger.exception(e)
+            self.logger.exception(e)
             self.stop_program()
 
 
@@ -549,19 +565,4 @@ if __name__ == '__main__':
     stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
     logger.addHandler(stream_handler)
 
-    if general['rover_if'] != 'n' and general['rover_if'] != 'N':
-        vehicle = connect(general['rover_conn'], wait_ready=True, baud=115200)
-        logger.info("[I] Connected to vehicle")
-
-        vehicle.mode = VehicleMode("GUIDED")
-        while not vehicle.mode == VehicleMode("GUIDED"):
-            time.sleep(1)
-        logger.info("[I] Guided mode ready")
-
-        vehicle.armed = True
-        while not vehicle.armed:
-            time.sleep(1)
-        logger.info("[I] Armed vehicle")
-        my_cav = CAV(platform.system(), vehicle)
-    else:
-        my_cav = CAV(platform.system(), None)
+    my_cav = CAV(platform.system(), general, logger)
