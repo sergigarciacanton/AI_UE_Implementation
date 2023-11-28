@@ -27,8 +27,9 @@ class CAV:
         self.next_node = None
         self.next_location = None
         self.logger = logger
-        if general['rover_if'] != 'n' and general['rover_if'] != 'N':
-            self.vehicle = connect(general['rover_conn'], wait_ready=True, baud=115200)
+        self.general = general
+        if self.general['rover_if'] != 'n' and self.general['rover_if'] != 'N':
+            self.vehicle = connect(self.general['rover_conn'], wait_ready=True, baud=115200)
             self.logger.info("[I] Connected to vehicle")
 
             self.vehicle.mode = VehicleMode("GUIDED")
@@ -43,7 +44,6 @@ class CAV:
         else:
             self.vehicle = None
         self.vehicle_active = False
-        self.general = general
 
         self.start_cav()
 
@@ -137,7 +137,7 @@ class CAV:
                             split_data.pop(i)
                         else:
                             i += 1
-                    if split_data[0] != general['wifi_ssid']:
+                    if split_data[0] != self.general['wifi_ssid']:
                         pass
                     else:
                         if int(split_data[2]) > best_pow:
@@ -169,7 +169,7 @@ class CAV:
                 message = json.dumps(dict(type="bye"))  # take input
                 self.client_socket.send(message.encode())  # send message
                 self.client_socket.recv(1024).decode()  # receive response
-            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                 if self.system_os == 'Windows':
                     process_disconnect = subprocess.Popen(
                         'netsh wlan disconnect',
@@ -181,7 +181,7 @@ class CAV:
                 elif self.system_os == 'Linux':
                     num = subprocess.check_output(['nmcli', 'connection']).decode().split('\n')[1].split(' ')[1]
                     process_disconnect = subprocess.Popen(
-                        'nmcli con down "' + general['wifi_ssid'] + ' ' + num + '"',
+                        'nmcli con down "' + self.general['wifi_ssid'] + ' ' + num + '"',
                         shell=True,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE)
@@ -197,17 +197,17 @@ class CAV:
 
     def fec_connect(self, address):
         # This function manages connecting to a new FEC given its MAC address
-        if general['training_if'] != 'y' and general['training_if'] != 'Y':
+        if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
             if self.system_os == 'Windows':
                 while not self.connected:
                     process_connect = subprocess.Popen(
-                        general['wifi_handler_file'] + ' /ConnectAP "' + general['wifi_ssid'] + '" "' + address + '"',
+                        self.general['wifi_handler_file'] + ' /ConnectAP "' + self.general['wifi_ssid'] + '" "' + address + '"',
                         shell=True,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE)
                     process_connect.communicate()
                     time.sleep(2)
-                    if general['wifi_ssid'] in str(subprocess.check_output("netsh wlan show interfaces")):
+                    if self.general['wifi_ssid'] in str(subprocess.check_output("netsh wlan show interfaces")):
                         self.logger.info('[I] Connected!')
                         self.connected = True
                     else:
@@ -223,7 +223,7 @@ class CAV:
                                                        stderr=subprocess.PIPE)
                     process_connect.communicate()
                     time.sleep(2)
-                    if general['wifi_ssid'] in str(subprocess.check_output("iwgetid")):
+                    if self.general['wifi_ssid'] in str(subprocess.check_output("iwgetid")):
                         self.logger.info('[I] Connected!')
                         self.connected = True
                     else:
@@ -235,10 +235,10 @@ class CAV:
                 self.logger.critical('[!] System OS not supported! Please, stop program...')
                 return
 
-            host = general['fec_ip']
+            host = self.general['fec_ip']
         else:
             host = address
-        port = int(general['fec_port'])  # socket server port number
+        port = int(self.general['fec_port'])  # socket server port number
         self.client_socket = socket.socket()
         ready = False
         while not ready:
@@ -262,7 +262,7 @@ class CAV:
                     self.my_vnf['cav_fec'] = self.fec_id
             else:
                 self.logger.error('[!] Error ' + str(json_data['res']) + ' when authenticating to FEC!')
-                if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                     self.user_id = self.get_data_by_console(int, '[*] Introduce a valid user ID: ')
                 else:
                     self.user_id = 1
@@ -305,16 +305,16 @@ class CAV:
     def stop_program(self):
         self.logger.info('[!] Ending...')
 
-        if self.system_os == 'Linux' and general['video_if'] == 'y' or general['video_if'] == 'Y':
+        if self.system_os == 'Linux' and self.general['video_if'] == 'y' or self.general['video_if'] == 'Y':
             os.system("sudo screen -S ue-stream -X stuff '^C\n'")
-        elif self.system_os == 'Windows' and general['video_if'] == 'y' or general['video_if'] == 'Y':
+        elif self.system_os == 'Windows' and self.general['video_if'] == 'y' or self.general['video_if'] == 'Y':
             os.system("taskkill /im vlc.exe")
 
         self.disconnect(False)
 
-        if self.system_os == 'Linux' and general['wireshark_if'] != 'n' and general['wireshark_if'] != 'N':
+        if self.system_os == 'Linux' and self.general['wireshark_if'] != 'n' and self.general['wireshark_if'] != 'N':
             os.system("sudo screen -S ue-wireshark -X stuff '^C\n'")
-        if self.system_os == 'Linux' and general['rover_if'] != 'n' and general['rover_if'] != 'N':
+        if self.system_os == 'Linux' and self.general['rover_if'] != 'n' and self.general['rover_if'] != 'N':
             self.logger.debug('[D] Disarming vehicle...')
             self.vehicle.armed = False
             self.vehicle.close()
@@ -323,21 +323,21 @@ class CAV:
         # Main function
         try:
             # Get user_id
-            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                 self.user_id = self.get_data_by_console(int, '[*] Introduce your user ID: ')
             else:
                 self.user_id = 1
 
             if self.system_os == 'Linux':
-                wireshark_if = general['wireshark_if']
+                wireshark_if = self.general['wireshark_if']
                 if wireshark_if != 'n' and wireshark_if != 'N':
                     script_path = os.path.dirname(os.path.realpath(__file__))
                     os.system(
-                        "sudo screen -S ue-wireshark -m -d sudo wireshark -i " + general['wlan_if_name'] + " -k -w " +
+                        "sudo screen -S ue-wireshark -m -d sudo wireshark -i " + self.general['wlan_if_name'] + " -k -w " +
                         script_path + "/logs/ue-wireshark.pcap")
-                video_if = general['video_if']
+                video_if = self.general['video_if']
             elif self.system_os == 'Windows':
-                video_if = general['video_if']
+                video_if = self.general['video_if']
             else:
                 self.logger.critical('[!] System OS not supported!')
                 exit(-1)
@@ -346,7 +346,7 @@ class CAV:
             self.disconnect(True)
 
             # Get the best FEC in terms of power and connect to it
-            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                 best_mac = ''
                 while best_mac == '':
                     time.sleep(2)
@@ -361,7 +361,7 @@ class CAV:
                               "http://rdmedia.bbc.co.uk/testcard/vod/manifests/avc-ctv-en-http.mpd")
             elif self.system_os == 'Windows':
                 if video_if == 'y' or video_if == 'Y':
-                    os.system("vlc " + general['video_link'])
+                    os.system("vlc " + self.general['video_link'])
 
             try:
                 # iterator = 0
@@ -370,7 +370,7 @@ class CAV:
                     if self.my_vnf is None:
                         valid_vnf = False
                         while not valid_vnf:
-                            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                                 self.my_vnf = self.generate_vnf()
                             else:
                                 random_vnf = VNF().get_request()
@@ -405,7 +405,7 @@ class CAV:
                                     self.next_location = json_data['location']
                                 if json_data['next_node'] == -1:
                                     self.logger.info('[I] Car reached target!')
-                                    if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                                    if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                                         key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                                     else:
                                         key_in = 'n'
@@ -438,7 +438,7 @@ class CAV:
                                 stop = False
                     while self.my_vnf is not None:
                         # Move to next point
-                        if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                        if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                             if json_data['cav_fec'] is not self.my_vnf['cav_fec']:
                                 self.handover(json_data['fec_mac'])
                         else:
@@ -457,7 +457,7 @@ class CAV:
                                                 self.vehicle.location.global_frame.lon) > 3:
                                 time.sleep(1)
                         else:
-                            if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                                 input('[*] Press Enter when getting to the next point...')
 
                         # Update state vector
@@ -495,7 +495,7 @@ class CAV:
                                 self.next_location = json_data['location']
                             if json_data['next_node'] == -1:
                                 self.logger.info('[I] Car reached target!')
-                                if general['training_if'] != 'y' and general['training_if'] != 'Y':
+                                if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                                     key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                                 else:
                                     key_in = 'n'
@@ -555,7 +555,7 @@ if __name__ == '__main__':
     # Import settings from configuration file
     config = configparser.ConfigParser()
     config.read('ue.ini')
-    general = config['general']
+    general = config['self.general']
 
     # Logging configuration
     logger = logging.getLogger('')
