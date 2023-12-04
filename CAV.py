@@ -156,6 +156,22 @@ class CAV:
             self.logger.critical('[!] System OS not supported! Please, stop program...')
             return
 
+    def get_ip_to_connect(self):
+        if self.my_vnf['source'] == 1 or self.my_vnf['source'] == 2 or self.my_vnf['source'] == 5\
+                or self.my_vnf['source'] == 6:
+            return self.general['fec_0_ip']
+        elif self.my_vnf['source'] == 3 or self.my_vnf['source'] == 4 or self.my_vnf['source'] == 7\
+                or self.my_vnf['source'] == 8:
+            return self.general['fec_1_ip']
+        elif self.my_vnf['source'] == 9 or self.my_vnf['source'] == 10 or self.my_vnf['source'] == 13\
+                or self.my_vnf['source'] == 14:
+            return self.general['fec_2_ip']
+        elif self.my_vnf['source'] == 11 or self.my_vnf['source'] == 12 or self.my_vnf['source'] == 15\
+                or self.my_vnf['source'] == 16:
+            return self.general['fec_3_ip']
+        else:
+            logger.error('[!] Non-existing VNF! Can not choose FEC to connect')
+
     def handover(self, address):
         # Function that handles handovers. First disconnects from current FEC and after connects to the new one
         self.logger.info('[I] Performing handover to ' + address)
@@ -345,6 +361,19 @@ class CAV:
             # In case of being connected to a network, disconnect
             self.disconnect(True)
 
+            # Generate VNF
+            stop = False
+            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
+                self.my_vnf = self.generate_vnf()
+            else:
+                random_vnf = VNF().get_request()
+                self.my_vnf = dict(source=random_vnf['source'],
+                                   target=random_vnf['target'], gpu=random_vnf['gpu'],
+                                   ram=random_vnf['ram'], bw=random_vnf['bw'],
+                                   previous_node=random_vnf['source'],
+                                   current_node=random_vnf['source'], cav_fec=self.fec_id,
+                                   time_steps=-1, user_id=self.user_id)
+
             # Get the best FEC in terms of power and connect to it
             if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                 best_mac = ''
@@ -354,7 +383,8 @@ class CAV:
 
                 self.fec_connect(best_mac)
             else:
-                self.fec_connect('192.168.0.2')
+                self.fec_connect(self.get_ip_to_connect())
+
             if self.system_os == 'Linux':
                 if video_if == 'y' or video_if == 'Y':
                     os.system("sudo screen -S ue-stream -m -d nvgstplayer-1.0 -i "
@@ -366,76 +396,63 @@ class CAV:
             try:
                 # iterator = 0
                 while True:
-                    stop = False
-                    if self.my_vnf is None:
-                        valid_vnf = False
-                        while not valid_vnf:
-                            if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
-                                self.my_vnf = self.generate_vnf()
-                            else:
-                                random_vnf = VNF().get_request()
-                                self.my_vnf = dict(source=random_vnf['source'],
-                                                   target=random_vnf['target'], gpu=random_vnf['gpu'],
-                                                   ram=random_vnf['ram'], bw=random_vnf['bw'],
-                                                   previous_node=random_vnf['source'],
-                                                   current_node=random_vnf['source'], cav_fec=self.fec_id,
-                                                   time_steps=-1, user_id=self.user_id)
-                            message = json.dumps(dict(type="vnf", data=self.my_vnf))  # take input
-                            self.client_socket.send(message.encode())  # send message
-                            data = self.client_socket.recv(1024).decode()  # receive response
-                            json_data = json.loads(data)
-                            self.logger.info('[I] Response from server: ' + str(json_data))
-                            # if iterator == 0:
-                            #     iterator += 1
-                            #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942')
-                            # elif iterator == 1:
-                            #     iterator += 1
-                            #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076')
-                            # elif iterator == 2:
-                            #     iterator += 1
-                            #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253')
-                            # elif iterator == 3:
-                            #     iterator += 1
-                            #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008')
-                            # else:
-                            #    json_data = dict(res=200, next_node=-1, location='41.27603977014193,1.988058630277008')
-                            if json_data['res'] == 200:
-                                self.next_node = json_data['next_node']
-                                if self.vehicle is not None and self.next_node != -1:
-                                    self.next_location = json_data['location']
-                                if json_data['next_node'] == -1:
-                                    self.logger.info('[I] Car reached target!')
-                                    if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
-                                        key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
-                                    else:
-                                        key_in = 'n'
-                                    if key_in != 'n':
-                                        self.my_vnf = None
-                                        valid_vnf = False
-                                        stop = False
-                                    else:
-                                        self.my_vnf = None
-                                        valid_vnf = True
-                                        stop = True
+                    if self.my_vnf['source'] == self.my_vnf['current_node'] == self.my_vnf['previous_node']:
+                        message = json.dumps(dict(type="vnf", data=self.my_vnf))  # take input
+                        self.client_socket.send(message.encode())  # send message
+                        data = self.client_socket.recv(1024).decode()  # receive response
+                        json_data = json.loads(data)
+                        self.logger.info('[I] Response from server: ' + str(json_data))
+                        # if iterator == 0:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=8, location='41.27607627820264,1.988212939805942')
+                        # elif iterator == 1:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=4, location='41.27618043781608,1.988175200657076')
+                        # elif iterator == 2:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=3, location='41.27614011136027,1.988006030851253')
+                        # elif iterator == 3:
+                        #     iterator += 1
+                        #     json_data = dict(res=200, next_node=7, location='41.27603977014193,1.988058630277008')
+                        # else:
+                        #    json_data = dict(res=200, next_node=-1, location='41.27603977014193,1.988058630277008')
+                        if json_data['res'] == 200:
+                            self.next_node = json_data['next_node']
+                            if self.vehicle is not None and self.next_node != -1:
+                                self.next_location = json_data['location']
+                            if json_data['next_node'] == -1:
+                                self.logger.info('[I] Car reached target!')
+                                if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
+                                    key_in = input('[?] Want to send a new VNF? Y/n: (Y) ')
                                 else:
-                                    valid_vnf = True
+                                    key_in = 'n'
+                                if key_in != 'n':
+                                    self.my_vnf = None
+                                    valid_vnf = False
                                     stop = False
-                            elif json_data['res'] == 403:
-                                self.my_vnf = None
-                                self.logger.error('[!] Error! Required resources are not available on current FEC. '
-                                             'Ask for less resources.')
-                                valid_vnf = False
-                                stop = False
-                            elif json_data['res'] == 404:
-                                self.my_vnf = None
-                                self.logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
-                                valid_vnf = False
-                                stop = False
+                                else:
+                                    self.my_vnf = None
+                                    valid_vnf = True
+                                    stop = True
                             else:
-                                self.my_vnf = None
-                                self.logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
-                                valid_vnf = False
+                                valid_vnf = True
                                 stop = False
+                        elif json_data['res'] == 403:
+                            self.my_vnf = None
+                            self.logger.error('[!] Error! Required resources are not available on current FEC. '
+                                              'Ask for less resources.')
+                            valid_vnf = False
+                            stop = False
+                        elif json_data['res'] == 404:
+                            self.my_vnf = None
+                            self.logger.error('[!] Error! Required target does not exist. Ask for an existing target.')
+                            valid_vnf = False
+                            stop = False
+                        else:
+                            self.my_vnf = None
+                            self.logger.error('[!] Error ' + str(json_data['res']) + ' when sending VNF to FEC!')
+                            valid_vnf = False
+                            stop = False
                     while self.my_vnf is not None:
                         # Move to next point
                         if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
@@ -534,6 +551,9 @@ class CAV:
                         break
                 message = json.dumps(dict(type="bye"))  # take input
                 self.client_socket.send(message.encode())  # send message
+                data = self.client_socket.recv(1024).decode()  # receive response
+                json_data = json.loads(data)
+                self.logger.debug('[D] Bye return code: ' + str(json_data['res']))
                 self.client_socket.close()  # close the connection
 
             except ConnectionRefusedError:
