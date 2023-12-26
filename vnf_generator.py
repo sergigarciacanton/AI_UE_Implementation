@@ -1,7 +1,7 @@
 # DEPENDENCIES
 import random
 import networkx as nx
-from globals import (
+from config import (
     MAX_GPU,
     MIN_GPU,
     MAX_RAM,
@@ -22,8 +22,8 @@ class VNF:
     def __init__(self, seed=None):
         # Set the seed
         random.seed(seed)
-        # Ensure ns and nd are not the same. Nodes start at 1 and end at number_of_nodes + 1
-        self.__ns, self.__nd = random.sample(range(1, G.number_of_nodes() + 1), 2)
+        # Ensure ns and nd are not the same. Nodes start at 0 and end at number_of_nodes
+        self.__ns, self.__nd = random.sample(range(0, G.number_of_nodes()), 2)
         self.__gpu = random.choice([MIN_GPU, MAX_GPU])
         self.__ram = random.choice([MIN_RAM, MAX_RAM])
         self.__bw = random.choice([MIN_BW, MAX_BW])
