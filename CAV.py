@@ -9,14 +9,14 @@ import logging
 import sys
 from colorlog import ColoredFormatter
 import os
-from dronekit import connect, VehicleMode
-import dronekit
+# from dronekit import connect, VehicleMode
+# import dronekit
 import math
-from vnf_generator import VNF
+from Utils.vnf_generator import VNF
 
 
 class CAV:
-    def __init__(self):
+    def __init__(self, nodes_to_evaluate=None):
         self.system_os = platform.system()
         self.client_socket = None
         self.connected = False
@@ -27,7 +27,7 @@ class CAV:
         self.next_node = None
         self.next_location = None
         config = configparser.ConfigParser()
-        config.read("ue.ini")
+        config.read("/home/upc_ai_vecn/Documents/AI_agent_env_implementation/ini_files/cav_outdoor.ini")
         self.general = config['general']
 
         self.logger = logging.getLogger('cav')
@@ -37,24 +37,24 @@ class CAV:
         stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
         self.logger.addHandler(stream_handler)
         logging.getLogger('pika').setLevel(logging.WARNING)
-        if self.general['rover_if'] != 'n' and self.general['rover_if'] != 'N':
-            self.vehicle = connect(self.general['rover_conn'], wait_ready=True, baud=115200)
-            self.logger.info("[I] Connected to vehicle")
-
-            self.vehicle.mode = VehicleMode("GUIDED")
-            while not self.vehicle.mode == VehicleMode("GUIDED"):
-                time.sleep(1)
-            self.logger.info("[I] Guided mode ready")
-
-            self.vehicle.armed = True
-            while not self.vehicle.armed:
-                time.sleep(1)
-            self.logger.info("[I] Armed vehicle")
-        else:
-            self.vehicle = None
+        # if self.general['rover_if'] != 'n' and self.general['rover_if'] != 'N':
+        #     self.vehicle = connect(self.general['rover_conn'], wait_ready=True, baud=115200)
+        #     self.logger.info("[I] Connected to vehicle")
+        #
+        #     self.vehicle.mode = VehicleMode("GUIDED")
+        #     while not self.vehicle.mode == VehicleMode("GUIDED"):
+        #         time.sleep(1)
+        #     self.logger.info("[I] Guided mode ready")
+        #
+        #     self.vehicle.armed = True
+        #     while not self.vehicle.armed:
+        #         time.sleep(1)
+        #     self.logger.info("[I] Armed vehicle")
+        # else:
+        self.vehicle = None
         self.vehicle_active = False
 
-        self.start_cav()
+        self.start_cav(nodes_to_evaluate)
 
     def get_data_by_console(self, data_type, message):
         # Function that reads a console entry asking for data to store into a variable
@@ -345,7 +345,7 @@ class CAV:
             self.vehicle.armed = False
             self.vehicle.close()
 
-    def start_cav(self):
+    def start_cav(self, nodes_to_evaluate):
         # Main function
         try:
             # Get user_id
@@ -377,7 +377,7 @@ class CAV:
             if self.general['training_if'] != 'y' and self.general['training_if'] != 'Y':
                 self.my_vnf = self.generate_vnf()
             else:
-                random_vnf = VNF().get_request()
+                random_vnf = VNF(nodes_to_evaluate=nodes_to_evaluate, nodes_for_bg_vehicles=None).get_request()
                 self.my_vnf = dict(source=random_vnf['source'],
                                    target=random_vnf['target'], gpu=random_vnf['gpu'],
                                    ram=random_vnf['ram'], bw=random_vnf['bw'],
@@ -453,10 +453,10 @@ class CAV:
                             if json_data['cav_fec'] is not self.my_vnf['cav_fec']:
                                 self.handover(json_data['fec_ip'])
                         if self.vehicle is not None and self.vehicle_active is False:
-                            point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
-                                                            float(self.next_location.split(',')[1]), 0)
-                            self.logger.debug('[D] Moving towards first target...')
-                            self.vehicle.simple_goto(point, 1)
+                            # point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
+                            #                                 float(self.next_location.split(',')[1]), 0)
+                            # self.logger.debug('[D] Moving towards first target...')
+                            # self.vehicle.simple_goto(point, 1)
                             self.vehicle_active = True
                         if self.vehicle is not None and self.vehicle_active is True:
                             while self.distance(float(self.next_location.split(',')[0]),
@@ -508,9 +508,9 @@ class CAV:
                                                         self.vehicle.location.global_frame.lon) > 1:
                                         time.sleep(1)
                                     self.logger.debug('[D] Reached next point! Loading next target...')
-                                    point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
-                                                                    float(self.next_location.split(',')[1]), 0)
-                                    self.vehicle.simple_goto(point, 1)
+                                    # point = dronekit.LocationGlobal(float(self.next_location.split(',')[0]),
+                                    #                                 float(self.next_location.split(',')[1]), 0)
+                                    # self.vehicle.simple_goto(point, 1)
                         elif json_data['res'] == 403:
                             self.my_vnf = None
                             self.logger.error('[!] Error! Required resources are not available on current FEC. '
